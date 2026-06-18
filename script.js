@@ -1,8 +1,8 @@
 'use strict';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const STORAGE_KEY = 'polyquarket_data_v1';
-const SESSION_KEY = 'polyquarket_session_v1';
+const STORAGE_KEY = 'polyquarket_data_v3';
+const SESSION_KEY = 'polyquarket_session_v3';
 
 const DEFAULT_DATA = {
   users: {
@@ -11,32 +11,86 @@ const DEFAULT_DATA = {
   },
   markets: [
     {
-      id: 'demo1',
-      title: 'Did Karen use Claude more than 5 times for this website? :D',
-      description: 'Resolves YES if Karen uses Claude on this more than 5 times before June 19, 2026.',
-      category: 'AI',
-      yesPool: 670, noPool: 330,
+      id: 'demo0',
+      title: 'Will Putri win a spherical cow award?',
+      description: 'Resolves YES if Putri wins a spherical cow award before June 19, 2026.',
+      category: 'Spherical Cow Awards',
+      yesPool: 67, noPool: 33,
       status: 'open', winner: null,
-      createdAt: '2003-01-23', endsAt: '2026-06-19'
+      createdAt: '2026-06-17', endsAt: '2026-06-19'
+    },
+    {
+      id: 'demo1',
+      title: 'Will we get back the second years for the oatmeal prank?',
+      description: 'Resolves YES if success before December 31, 2026.',
+      category: 'Random',
+      yesPool: 140, noPool: 65,
+      status: 'open', winner: null,
+      createdAt: '2026-06-17', endsAt: '2026-12-31'
     },
     {
       id: 'demo2',
       title: 'Is matcha the best caffinated beverage?',
       description: 'Resolves YES if matcha is determined to be the best caffinated beverage.',
-      category: 'Food',
-      yesPool: 520, noPool: 480,
+      category: 'Random',
+      yesPool: 420, noPool: 0,
       status: 'open', winner: null,
       createdAt: '2026-06-17', endsAt: '2026-12-31'
     },
     {
       id: 'demo3',
-      title: 'Will the particle succeed?',
-      description: 'Resolves YES if the particle is the goat.',
-      category: 'Physics',
+      title: 'Will a Dave win the battle of the Daves?',
+      description: 'Resolves YES if a Dave triumphs in the ultimate showdown before December 31, 2026.',
+      category: 'Skits',
       yesPool: 180, noPool: 820,
       status: 'open', winner: null,
       createdAt: '2026-06-17', endsAt: '2026-12-31'
-    }
+    },
+    {
+      id: 'demo4',
+      title: 'Will this be the best every FTY?',
+      description: 'Resolves YES if success before December 31, 2026.',
+      category: 'Spherical Cow Awards',
+      yesPool: 50, noPool: 95,
+      status: 'open', winner: null,
+      createdAt: '2026-06-17', endsAt: '2026-12-31'
+    },
+    {
+      id: 'demo5',
+      title: 'Will we find dark matter?',
+      description: 'Resolves YES if we find dark matter before December 31, 2026.',
+      category: 'Physics',
+      yesPool: 300, noPool: 300,
+      status: 'open', winner: null,
+      createdAt: '2026-06-17', endsAt: '2026-12-31'
+    },
+    {
+      id: 'demo6',
+      title: 'Will the particle succeed?',
+      description: 'Resolves YES if the particle is the goat.',
+      category: 'Physics',
+      yesPool: 667, noPool: 333,
+      status: 'open', winner: null,
+      createdAt: '2026-06-17', endsAt: '2026-12-31'
+    },
+    {
+      id: 'demo7',
+      title: 'Will Bob Wald make an appearance? ',
+      description: 'Resolves YES if Bob Wald spawns in before December 31, 2026.',
+      category: 'Skits',
+      yesPool: 550, noPool: 450,
+      status: 'open', winner: null,
+      createdAt: '2026-06-17', endsAt: '2026-12-31'
+    },
+    {
+      id: 'demo8',
+      title: 'Did Karen use Claude more than 5 times for this website? :D',
+      description: 'Resolves YES if Karen uses Claude on this more than 5 times before June 19, 2026.',
+      category: 'Random',
+      yesPool: 670, noPool: 330,
+      status: 'open', winner: null,
+      createdAt: '2003-01-23', endsAt: '2026-06-19'
+    },
   ]
 };
 
@@ -405,8 +459,7 @@ function renderMarkets() {
 }
 
 const CAT_COLORS = {
-  AI: '#7c3aed', Physics: '#0ea5e9', Sports: '#16a34a',
-  Food: '#f59e0b', Random: '#6b7280'
+  Physics: '#0ea5e9', Skits: '#7c3aed', 'Spherical Cow Awards': '#f59e0b', Random: '#6b7280'
 };
 
 function marketCard(m) {
@@ -558,10 +611,9 @@ function renderAdmin() {
             <div class="field">
               <label>Category</label>
               <select id="f-cat">
-                <option>AI</option>
                 <option>Physics</option>
-                <option>Sports</option>
-                <option>Food</option>
+                <option>Skits</option>
+                <option>Spherical Cow Awards</option>
                 <option>Random</option>
               </select>
             </div>
