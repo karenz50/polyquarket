@@ -65,6 +65,7 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
 }
 
 .header-gem { color: var(--primary); font-size: 20px; }
+.header-logo { height: 28px; width: 28px; object-fit: contain; }
 
 .header-nav {
   display: flex;
@@ -715,6 +716,7 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
   margin-bottom: 6px;
 }
 .brand-gem  { color: var(--primary); font-size: 26px; }
+.brand-logo { height: 40px; width: 40px; object-fit: contain; }
 .brand-name { font-size: 24px; font-weight: 800; letter-spacing: -.5px; }
 
 .login-tagline {

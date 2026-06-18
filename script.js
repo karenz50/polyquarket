@@ -1,13 +1,13 @@
 'use strict';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const STORAGE_KEY = 'nexus_data_v1';
-const SESSION_KEY = 'nexus_session_v1';
+const STORAGE_KEY = 'polyquarket_data_v1';
+const SESSION_KEY = 'polyquarket_session_v1';
 
 const DEFAULT_DATA = {
   users: {
-    bob:   { password: '1234',  role: 'user',  balance: 67, holdings: {} },
-    admin: { password: 'admin', role: 'admin', balance: 67, holdings: {} }
+    karen:   { password: '1234',  role: 'user',  balance: 67, holdings: {} },
+    elizabeth: { password: 'goat', role: 'admin', balance: 67, holdings: {} }
   },
   markets: [
     {
@@ -239,7 +239,7 @@ function exportJSON() {
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href = url;
-  a.download = 'nexus_markets.json';
+  a.download = 'polyquarket.json';
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -314,8 +314,8 @@ function renderLogin() {
     <div class="login-wrap">
       <div class="login-card">
         <div class="login-brand">
-          <span class="brand-gem">◆</span>
-          <span class="brand-name">Nexus Markets</span>
+          <img src="logo.png" alt="Polyquarket" class="brand-logo">
+          <span class="brand-name">Polyquarket</span>
         </div>
         <p class="login-tagline">Predict. Trade. Profit.</p>
 
@@ -333,8 +333,8 @@ function renderLogin() {
         </form>
 
         <div class="login-hint">
-          <div><span class="hint-label">User:</span> <code>bob</code> / <code>1234</code></div>
-          <div><span class="hint-label">Admin:</span> <code>admin</code> / <code>admin</code></div>
+          <div><span class="hint-label">User:</span> <code>karen</code> / <code>1234</code></div>
+          <div><span class="hint-label">Admin:</span> <code>elizabeth</code> / <code>goat</code></div>
         </div>
       </div>
     </div>
