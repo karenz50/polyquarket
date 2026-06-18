@@ -23,7 +23,7 @@ const DEFAULT_DATA = {
       id: 'demo2',
       title: 'Will the S&P 500 reach 7,000 points by end of 2025?',
       description: 'Resolves YES if the S&P 500 closes at or above 7,000 on any trading day before December 31, 2025.',
-      category: 'Finance',
+      category: 'Random',
       yesPool: 520, noPool: 480,
       status: 'open', winner: null,
       createdAt: '2025-01-01', endsAt: '2025-12-31'
@@ -32,7 +32,7 @@ const DEFAULT_DATA = {
       id: 'demo3',
       title: 'Will SpaceX successfully land humans on Mars before 2030?',
       description: 'Resolves YES if SpaceX achieves a crewed Mars landing confirmed by NASA or independent verification.',
-      category: 'Science',
+      category: 'Physics',
       yesPool: 180, noPool: 820,
       status: 'open', winner: null,
       createdAt: '2025-01-01', endsAt: '2029-12-31'
@@ -201,7 +201,7 @@ function addMarket(title, description, category, endsAt) {
     id: 'm' + Date.now(),
     title: title.trim(),
     description: description.trim(),
-    category: category || 'General',
+    category: category || 'Random',
     yesPool: 0, noPool: 0,
     status: 'open', winner: null,
     createdAt: new Date().toISOString().slice(0, 10),
@@ -405,8 +405,8 @@ function renderMarkets() {
 }
 
 const CAT_COLORS = {
-  AI: '#7c3aed', Finance: '#0ea5e9', Politics: '#dc2626',
-  Sports: '#16a34a', Science: '#f59e0b', General: '#6b7280'
+  AI: '#7c3aed', Physics: '#0ea5e9', Sports: '#16a34a',
+  Food: '#f59e0b', Random: '#6b7280'
 };
 
 function marketCard(m) {
@@ -558,12 +558,11 @@ function renderAdmin() {
             <div class="field">
               <label>Category</label>
               <select id="f-cat">
-                <option>General</option>
                 <option>AI</option>
-                <option>Finance</option>
-                <option>Politics</option>
+                <option>Physics</option>
                 <option>Sports</option>
-                <option>Science</option>
+                <option>Food</option>
+                <option>Random</option>
               </select>
             </div>
             <div class="field">
@@ -576,11 +575,11 @@ function renderAdmin() {
 
           <div class="json-actions">
             <h3 class="section-head mt-6">Data</h3>
-            <p class="hint-txt">Markets are stored as JSON in your browser. Export to save a backup or share data.</p>
+            <p class="hint-txt">Markets are stored in your browser. Export to save a backup or share data.</p>
             <div class="btn-row">
-              <button class="btn btn-ghost" onclick="exportJSON()">⬇ Export JSON</button>
+              <button class="btn btn-ghost" onclick="exportJSON()">⬇ Export</button>
               <label class="btn btn-ghost" style="cursor:pointer">
-                ⬆ Import JSON
+                ⬆ Import
                 <input type="file" accept=".json" style="display:none" onchange="importJSON(this.files[0])">
               </label>
             </div>
