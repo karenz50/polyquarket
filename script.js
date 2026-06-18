@@ -12,30 +12,30 @@ const DEFAULT_DATA = {
   markets: [
     {
       id: 'demo1',
-      title: 'Will artificial general intelligence (AGI) be achieved before 2027?',
-      description: 'Resolves YES if a major AI lab announces a system widely recognized as AGI before January 1, 2027.',
+      title: 'Did Karen use Claude more than 5 times for this website? :D',
+      description: 'Resolves YES if Karen uses Claude on this more than 5 times before June 19, 2026.',
       category: 'AI',
-      yesPool: 340, noPool: 660,
+      yesPool: 670, noPool: 330,
       status: 'open', winner: null,
-      createdAt: '2025-01-01', endsAt: '2026-12-31'
+      createdAt: '2003-01-23', endsAt: '2026-06-19'
     },
     {
       id: 'demo2',
-      title: 'Will the S&P 500 reach 7,000 points by end of 2025?',
-      description: 'Resolves YES if the S&P 500 closes at or above 7,000 on any trading day before December 31, 2025.',
-      category: 'Random',
+      title: 'Is matcha the best caffinated beverage?',
+      description: 'Resolves YES if matcha is determined to be the best caffinated beverage.',
+      category: 'Food',
       yesPool: 520, noPool: 480,
       status: 'open', winner: null,
-      createdAt: '2025-01-01', endsAt: '2025-12-31'
+      createdAt: '2026-06-17', endsAt: '2026-12-31'
     },
     {
       id: 'demo3',
-      title: 'Will SpaceX successfully land humans on Mars before 2030?',
-      description: 'Resolves YES if SpaceX achieves a crewed Mars landing confirmed by NASA or independent verification.',
+      title: 'Will the particle succeed?',
+      description: 'Resolves YES if the particle is the goat.',
       category: 'Physics',
       yesPool: 180, noPool: 820,
       status: 'open', winner: null,
-      createdAt: '2025-01-01', endsAt: '2029-12-31'
+      createdAt: '2026-06-17', endsAt: '2026-12-31'
     }
   ]
 };
