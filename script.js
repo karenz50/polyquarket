@@ -426,10 +426,6 @@ function renderLogin() {
           <button type="submit" class="btn btn-primary w-full mt-4">Sign In</button>
         </form>
 
-        <div class="login-hint">
-          <div><span class="hint-label">User:</span> <code>karen</code> / <code>1234</code></div>
-          <div><span class="hint-label">Admin:</span> <code>elizabeth</code> / <code>goat</code></div>
-        </div>
       </div>
     </div>
   `;
