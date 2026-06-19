@@ -814,6 +814,17 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .4px; }
 
+.pool-label-row { display: flex; align-items: baseline; gap: 8px; }
+.pool-hint { font-size: 11px; font-weight: 400; color: var(--text3); text-transform: none; letter-spacing: 0; }
+.pool-inputs-row { display: flex; gap: 10px; }
+.pool-input-wrap { display: flex; align-items: center; gap: 0; flex: 1; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--r-sm); overflow: hidden; }
+.pool-input-wrap .amount-prefix { padding: 0 4px 0 10px; color: var(--text3); font-size: 14px; }
+.pool-input-wrap input { border: none; background: transparent; padding: 10px 10px 10px 2px; width: 100%; }
+.pool-input-wrap input:focus { outline: none; }
+.pool-tag { font-size: 11px; font-weight: 700; padding: 0 8px; height: 100%; display: flex; align-items: center; border-right: 1px solid var(--border2); letter-spacing: .4px; }
+.pool-tag.yes { color: var(--yes); background: #16a34a18; }
+.pool-tag.no  { color: var(--no);  background: #dc262618; }
+
 input[type=text],
 input[type=password],
 input[type=number],
@@ -1006,6 +1017,16 @@ select option { background: var(--surface2); }
 .users-adj-panel {
   padding: 16px;
   border-top: 1px solid var(--border);
+  background: var(--surface2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.users-adj-inline {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   background: var(--surface2);
   display: flex;
   flex-direction: column;

@@ -354,14 +354,18 @@ function adjustBalance(username, delta) {
   return { success: true };
 }
 
-function addMarket(title, description, category, endsAt) {
+function addMarket(title, description, category, endsAt, yesPool, noPool) {
   if (!title.trim()) return { success: false, error: 'Title is required.' };
+  const yp = yesPool !== '' && yesPool !== undefined ? parseFloat(yesPool) : 500;
+  const np = noPool  !== '' && noPool  !== undefined ? parseFloat(noPool)  : 500;
+  if (isNaN(yp) || yp < 0) return { success: false, error: 'YES pool must be a non-negative number.' };
+  if (isNaN(np) || np < 0) return { success: false, error: 'NO pool must be a non-negative number.' };
   const market = {
     id: 'm' + Date.now(),
     title: title.trim(),
     description: description.trim(),
     category: category || 'Random',
-    yesPool: 0, noPool: 0,
+    yesPool: +yp.toFixed(2), noPool: +np.toFixed(2),
     status: 'open', winner: null,
     createdAt: new Date().toISOString().slice(0, 10),
     endsAt: endsAt || ''
@@ -782,6 +786,24 @@ function renderAdmin() {
                 <label>End Date</label>
                 <input id="f-ends" type="date">
               </div>
+              <div class="field">
+                <label class="pool-label-row">
+                  Starting Pools
+                  <span class="pool-hint">recommended total: $1000</span>
+                </label>
+                <div class="pool-inputs-row">
+                  <div class="pool-input-wrap">
+                    <span class="pool-tag yes">YES</span>
+                    <span class="amount-prefix">$</span>
+                    <input id="f-yes-pool" type="number" min="0" step="0.01" placeholder="500">
+                  </div>
+                  <div class="pool-input-wrap">
+                    <span class="pool-tag no">NO</span>
+                    <span class="amount-prefix">$</span>
+                    <input id="f-no-pool" type="number" min="0" step="0.01" placeholder="500">
+                  </div>
+                </div>
+              </div>
               <div id="add-err" class="err-msg" style="display:none"></div>
               <button type="submit" class="btn btn-primary w-full">Create Market</button>
             </form>
@@ -811,9 +833,6 @@ function renderAdmin() {
               ${usersAdminRows(Object.entries(appData.users))}
             </div>
           </div>
-          <div class="users-adj-panel" id="users-adj-panel">
-            ${adjPanelHTML()}
-          </div>
         </div>
       </div>
     </div>
@@ -839,7 +858,9 @@ function renderAdmin() {
       document.getElementById('f-title').value,
       document.getElementById('f-desc').value,
       document.getElementById('f-cat').value,
-      document.getElementById('f-ends').value
+      document.getElementById('f-ends').value,
+      document.getElementById('f-yes-pool').value,
+      document.getElementById('f-no-pool').value
     );
     if (res.success) {
       showToast('Market created!', 'success');
@@ -930,12 +951,19 @@ function adjPanelHTML() {
 function bindUserRows() {
   document.querySelectorAll('.users-admin-row').forEach(row => {
     row.addEventListener('click', () => {
-      selectedAdjUser = row.dataset.username;
+      const wasSelected = selectedAdjUser === row.dataset.username;
+      selectedAdjUser = wasSelected ? null : row.dataset.username;
       document.querySelectorAll('.users-admin-row').forEach(r =>
         r.classList.toggle('selected', r.dataset.username === selectedAdjUser)
       );
-      document.getElementById('users-adj-panel').innerHTML = adjPanelHTML();
-      bindAdjButtons();
+      document.querySelectorAll('.users-adj-inline').forEach(el => el.remove());
+      if (selectedAdjUser) {
+        const panel = document.createElement('div');
+        panel.className = 'users-adj-inline';
+        panel.innerHTML = adjPanelHTML();
+        row.after(panel);
+        bindAdjButtons();
+      }
     });
   });
 }
