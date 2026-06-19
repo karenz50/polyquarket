@@ -1,7 +1,19 @@
 'use strict';
 
+// ── Firebase ───────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyBxzhN0DuZR2xjLTA_nyGzCogTi5OibhLM",
+  authDomain: "polyquarket.firebaseapp.com",
+  databaseURL: "https://polyquarket-default-rtdb.firebaseio.com",
+  projectId: "polyquarket",
+  storageBucket: "polyquarket.firebasestorage.app",
+  messagingSenderId: "878294730665",
+  appId: "1:878294730665:web:cac1d6815c823bb06566b8"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
 // ── Constants ──────────────────────────────────────────────────────────────
-const STORAGE_KEY = 'polyquarket_data_v3';
 const SESSION_KEY = 'polyquarket_session_v3';
 
 const DEFAULT_DATA = {
@@ -102,24 +114,51 @@ let selectedMarketId = null;
 let selectedTradeSide = 'yes';
 
 // ── Storage ────────────────────────────────────────────────────────────────
-function loadData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    appData = raw ? JSON.parse(raw) : deepCopy(DEFAULT_DATA);
-  } catch {
-    appData = deepCopy(DEFAULT_DATA);
-  }
-  if (!appData.users)   appData.users   = deepCopy(DEFAULT_DATA.users);
-  if (!appData.markets) appData.markets = deepCopy(DEFAULT_DATA.markets);
-  saveData();
-}
+let _dbInitialized = false;
 
 function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+  db.ref('appData').set(appData);
 }
 
 function deepCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+function startRealtimeListener() {
+  db.ref('appData').on('value', snapshot => {
+    const data = snapshot.val();
+
+    if (!_dbInitialized) {
+      _dbInitialized = true;
+      if (data) {
+        appData = data;
+        if (!appData.users)   appData.users   = deepCopy(DEFAULT_DATA.users);
+        if (!appData.markets) appData.markets = deepCopy(DEFAULT_DATA.markets);
+      } else {
+        appData = deepCopy(DEFAULT_DATA);
+        saveData();
+      }
+      if (loadSession()) {
+        showView('markets');
+      } else {
+        showView('login');
+      }
+      return;
+    }
+
+    // Remote update from another client
+    if (!data) return;
+    appData = data;
+    syncCurrentUser();
+    if (currentUser) {
+      switch (activeView) {
+        case 'markets':   renderMarkets();   break;
+        case 'portfolio': renderPortfolio(); break;
+        case 'admin':     renderAdmin();     break;
+      }
+      refreshHeader();
+    }
+  });
 }
 
 // ── Session ────────────────────────────────────────────────────────────────
@@ -326,6 +365,7 @@ function showView(view) {
 
   activeView = view;
   document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+  document.getElementById('view-loading')?.classList.remove('active');
   document.getElementById('view-' + view)?.classList.add('active');
   document.querySelectorAll('.nav-link').forEach(el =>
     el.classList.toggle('active', el.dataset.view === view)
@@ -627,7 +667,7 @@ function renderAdmin() {
 
           <div class="json-actions">
             <h3 class="section-head mt-6">Data</h3>
-            <p class="hint-txt">Markets are stored in your browser. Export to save a backup or share data.</p>
+            <p class="hint-txt">Data is synced live via Firebase. Export to save a local backup.</p>
             <div class="btn-row">
               <button class="btn btn-ghost" onclick="exportJSON()">⬇ Export</button>
               <label class="btn btn-ghost" style="cursor:pointer">
@@ -944,8 +984,6 @@ function showToast(msg, type = 'info') {
 
 // ── Init ───────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  loadData();
-
   document.getElementById('market-modal').addEventListener('click', e => {
     if (e.target === e.currentTarget) closeModal();
   });
@@ -956,9 +994,5 @@ window.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('logout-btn').addEventListener('click', logout);
 
-  if (loadSession()) {
-    showView('markets');
-  } else {
-    showView('login');
-  }
+  startRealtimeListener();
 });
