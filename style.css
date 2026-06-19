@@ -1001,6 +1001,10 @@ select option { background: var(--surface2); }
   z-index: 1;
 }
 
+.uar-identity { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.uar-name { font-weight: 600; }
+.uar-email { font-size: 11px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .users-admin-row {
   border-top: 1px solid var(--border);
   cursor: pointer;

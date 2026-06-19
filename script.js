@@ -906,7 +906,9 @@ function renderAdmin() {
   // ── Users tab listeners ──
   document.getElementById('user-search')?.addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
-    const filtered = Object.entries(appData.users).filter(([name]) => name.toLowerCase().includes(q));
+    const filtered = Object.entries(appData.users).filter(([name, u]) =>
+      name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
+    );
     document.getElementById('users-admin-tbody').innerHTML = usersAdminRows(filtered);
     bindUserRows();
   });
@@ -919,7 +921,10 @@ function usersAdminRows(entries) {
   if (!entries.length) return '<p class="hint-txt" style="padding:14px 16px">No users match.</p>';
   return entries.map(([name, u]) => `
     <div class="users-admin-row ${selectedAdjUser === name ? 'selected' : ''}" data-username="${esc(name)}">
-      <span class="uar-name">${esc(name)}</span>
+      <span class="uar-identity">
+        <span class="uar-name">${esc(name)}</span>
+        ${u.email ? `<span class="uar-email">${esc(u.email)}</span>` : ''}
+      </span>
       <span class="role-badge ${u.role}">${u.role}</span>
       <span>${fmt$(u.balance)}</span>
     </div>
