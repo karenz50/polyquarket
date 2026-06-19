@@ -7,11 +7,13 @@ const db = firebase.database();
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SESSION_KEY = 'polyquarket_session_v3';
+const CURRENT_DATA_VERSION = 1;
 
 const DEFAULT_DATA = {
+  meta: { dataVersion: CURRENT_DATA_VERSION },
   users: {
-    karen:   { password: '1234',  role: 'user',  balance: 67, holdings: {} },
-    elizabeth: { password: 'goat', role: 'admin', balance: 67, holdings: {} }
+    karen:     { password: '1234', role: 'user',  balance: 670 },
+    elizabeth: { password: 'goat', role: 'admin', balance: 670 }
   },
   markets: [
     {
@@ -116,6 +118,18 @@ function deepCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
+function applyMigrations(fromVersion) {
+  if (fromVersion < 1) {
+    // v1: reset all user balances to 670
+    for (const ud of Object.values(appData.users)) {
+      ud.balance = 670;
+    }
+  }
+  if (!appData.meta) appData.meta = {};
+  appData.meta.dataVersion = CURRENT_DATA_VERSION;
+  saveData();
+}
+
 function startRealtimeListener() {
   db.ref('appData').on('value', snapshot => {
     const data = snapshot.val();
@@ -126,6 +140,12 @@ function startRealtimeListener() {
         appData = data;
         if (!appData.users)   appData.users   = deepCopy(DEFAULT_DATA.users);
         if (!appData.markets) appData.markets = deepCopy(DEFAULT_DATA.markets);
+        if (!appData.meta)    appData.meta    = { dataVersion: 0 };
+
+        const storedVersion = appData.meta.dataVersion || 0;
+        if (storedVersion < CURRENT_DATA_VERSION) {
+          applyMigrations(storedVersion);
+        }
       } else {
         appData = deepCopy(DEFAULT_DATA);
         saveData();
