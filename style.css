@@ -767,6 +767,49 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
   color: var(--text2);
 }
 
+.login-links {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+.forgot-info {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.forgot-desc {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.6;
+}
+
+.forgot-contacts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.forgot-contacts-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.forgot-email-link {
+  font-size: 13px;
+  color: var(--primary);
+  word-break: break-all;
+}
+
 /* ── Forms ─────────────────────────────────────────────────────────────── */
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .4px; }

@@ -9,6 +9,7 @@ const db = firebase.database();
 const SESSION_KEY = 'polyquarket_session_v3';
 const CURRENT_DATA_VERSION = 1;
 
+
 const DEFAULT_DATA = {
   meta: { dataVersion: CURRENT_DATA_VERSION },
   users: {
@@ -141,9 +142,13 @@ function startRealtimeListener() {
       _dbInitialized = true;
       if (data) {
         appData = data;
-        if (!appData.users)   appData.users   = deepCopy(DEFAULT_DATA.users);
-        if (!appData.markets) appData.markets = deepCopy(DEFAULT_DATA.markets);
-        if (!appData.meta)    appData.meta    = { dataVersion: 0 };
+        if (!appData.users)        appData.users        = deepCopy(DEFAULT_DATA.users);
+        if (!appData.markets)      appData.markets      = deepCopy(DEFAULT_DATA.markets);
+        if (!appData.meta)         appData.meta         = { dataVersion: 0 };
+        if (!appData.notifyEmails) {
+          appData.notifyEmails = ['efield@uchicago.edu', 'karen.zhou50@gmail.com'];
+          saveData();
+        }
 
         const storedVersion = appData.meta.dataVersion || 0;
         if (storedVersion < CURRENT_DATA_VERSION) {
@@ -437,7 +442,68 @@ function refreshHeader() {
 
 // ── Render: Login ──────────────────────────────────────────────────────────
 function renderLogin() {
-  const isRegister = loginMode === 'register';
+  const mode = loginMode; // 'signin' | 'register' | 'forgot'
+
+  let formHTML = '';
+
+  if (mode === 'register') {
+    formHTML = `
+      <form id="auth-form">
+        <div class="field">
+          <label>Email</label>
+          <input id="inp-email" type="email" placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="field">
+          <label>Username</label>
+          <input id="inp-user" type="text" placeholder="username" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input id="inp-pass" type="password" placeholder="password" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirm Password</label>
+          <input id="inp-pass2" type="password" placeholder="confirm password" autocomplete="new-password">
+        </div>
+        <div id="auth-err" class="err-msg" style="display:none"></div>
+        <button type="submit" class="btn btn-primary w-full mt-4">Create Account</button>
+      </form>
+      <p class="login-switch">Already have an account? <a href="#" id="link-signin">Sign in</a></p>
+    `;
+  } else if (mode === 'forgot') {
+    const contacts = (appData.notifyEmails || []);
+    formHTML = `
+      <div class="forgot-info">
+        <p class="forgot-desc">To reset your password, contact an admin with your username or email address.</p>
+        ${contacts.length ? `
+          <div class="forgot-contacts">
+            <span class="forgot-contacts-label">Admin contact${contacts.length > 1 ? 's' : ''}:</span>
+            ${contacts.map(e => `<a href="mailto:${esc(e)}" class="forgot-email-link">${esc(e)}</a>`).join('')}
+          </div>
+        ` : ''}
+      </div>
+      <p class="login-switch"><a href="#" id="link-signin">Back to sign in</a></p>
+    `;
+  } else {
+    formHTML = `
+      <form id="auth-form">
+        <div class="field">
+          <label>Username</label>
+          <input id="inp-user" type="text" placeholder="username" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input id="inp-pass" type="password" placeholder="password" autocomplete="current-password">
+        </div>
+        <div id="auth-err" class="err-msg" style="display:none"></div>
+        <button type="submit" class="btn btn-primary w-full mt-4">Sign In</button>
+      </form>
+      <div class="login-links">
+        <a href="#" id="link-forgot">Forgot password?</a>
+        <a href="#" id="link-register">Create an account</a>
+      </div>
+    `;
+  }
 
   document.getElementById('view-login').innerHTML = `
     <div class="login-wrap">
@@ -447,72 +513,47 @@ function renderLogin() {
           <span class="brand-name">Polyquarket</span>
         </div>
         <p class="login-tagline">Predict. Trade. Profit.</p>
-
-        <form id="auth-form">
-          ${isRegister ? `
-            <div class="field">
-              <label>Email</label>
-              <input id="inp-email" type="email" placeholder="you@example.com" autocomplete="email">
-            </div>
-          ` : ''}
-          <div class="field">
-            <label>Username</label>
-            <input id="inp-user" type="text" placeholder="username" autocomplete="username">
-          </div>
-          <div class="field">
-            <label>Password</label>
-            <input id="inp-pass" type="password" placeholder="password"
-              autocomplete="${isRegister ? 'new-password' : 'current-password'}">
-          </div>
-          ${isRegister ? `
-            <div class="field">
-              <label>Confirm Password</label>
-              <input id="inp-pass2" type="password" placeholder="confirm password" autocomplete="new-password">
-            </div>
-          ` : ''}
-          <div id="auth-err" class="err-msg" style="display:none"></div>
-          <button type="submit" class="btn btn-primary w-full mt-4">
-            ${isRegister ? 'Create Account' : 'Sign In'}
-          </button>
-        </form>
-
-        <p class="login-switch">
-          ${isRegister
-            ? 'Already have an account? <a href="#" id="switch-mode">Sign in</a>'
-            : 'New here? <a href="#" id="switch-mode">Create an account</a>'}
-        </p>
+        ${formHTML}
       </div>
     </div>
   `;
 
-  document.getElementById('switch-mode').addEventListener('click', e => {
-    e.preventDefault();
-    loginMode = isRegister ? 'signin' : 'register';
-    renderLogin();
+  // Navigation links
+  document.getElementById('link-signin')?.addEventListener('click', e => {
+    e.preventDefault(); loginMode = 'signin'; renderLogin();
+  });
+  document.getElementById('link-register')?.addEventListener('click', e => {
+    e.preventDefault(); loginMode = 'register'; renderLogin();
+  });
+  document.getElementById('link-forgot')?.addEventListener('click', e => {
+    e.preventDefault(); loginMode = 'forgot'; renderLogin();
   });
 
-  document.getElementById('auth-form').addEventListener('submit', e => {
+  // Form submit (not present in 'forgot' mode)
+  document.getElementById('auth-form')?.addEventListener('submit', e => {
     e.preventDefault();
     const errEl = document.getElementById('auth-err');
     errEl.style.display = 'none';
 
-    if (isRegister) {
-      const email  = document.getElementById('inp-email').value;
-      const user   = document.getElementById('inp-user').value;
-      const pass   = document.getElementById('inp-pass').value;
-      const pass2  = document.getElementById('inp-pass2').value;
-      const res    = register(email, user, pass, pass2);
+    if (mode === 'register') {
+      const res = register(
+        document.getElementById('inp-email').value,
+        document.getElementById('inp-user').value,
+        document.getElementById('inp-pass').value,
+        document.getElementById('inp-pass2').value
+      );
       if (res.success) {
-        login(user, pass);
+        login(document.getElementById('inp-user').value.trim(), document.getElementById('inp-pass').value);
         showView('markets');
       } else {
         errEl.textContent = res.error;
         errEl.style.display = 'block';
       }
     } else {
-      const user = document.getElementById('inp-user').value.trim();
-      const pass = document.getElementById('inp-pass').value;
-      const res  = login(user, pass);
+      const res = login(
+        document.getElementById('inp-user').value.trim(),
+        document.getElementById('inp-pass').value
+      );
       if (res.success) {
         showView('markets');
       } else {
