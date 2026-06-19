@@ -146,7 +146,7 @@ function startRealtimeListener() {
         if (!appData.markets)      appData.markets      = deepCopy(DEFAULT_DATA.markets);
         if (!appData.meta)         appData.meta         = { dataVersion: 0 };
         if (!appData.notifyEmails) {
-          appData.notifyEmails = ['efield@uchicago.edu', 'karen.zhou50@gmail.com'];
+          appData.notifyEmails = ['efield@uchicago.edu'];
           saveData();
         }
 
@@ -474,7 +474,7 @@ function renderLogin() {
     const contacts = (appData.notifyEmails || []);
     formHTML = `
       <div class="forgot-info">
-        <p class="forgot-desc">To reset your password, contact an admin with your username or email address.</p>
+        <p class="forgot-desc">To find/reset your username/password, contact an admin with your username or email address.</p>
         ${contacts.length ? `
           <div class="forgot-contacts">
             <span class="forgot-contacts-label">Admin contact${contacts.length > 1 ? 's' : ''}:</span>
@@ -499,7 +499,7 @@ function renderLogin() {
         <button type="submit" class="btn btn-primary w-full mt-4">Sign In</button>
       </form>
       <div class="login-links">
-        <a href="#" id="link-forgot">Forgot password?</a>
+        <a href="#" id="link-forgot">Forgot username/password?</a>
         <a href="#" id="link-register">Create an account</a>
       </div>
     `;
