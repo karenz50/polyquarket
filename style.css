@@ -858,16 +858,145 @@ select option { background: var(--surface2); }
 .mt-6   { margin-top: 24px; }
 .mt-8   { margin-top: 32px; }
 
-/* ── Balance Adjustment ────────────────────────────────────────────────── */
-.balance-adj-form {
+/* ── Admin Tabs ────────────────────────────────────────────────────────── */
+.admin-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-tab {
+  padding: 9px 22px;
+  border: none;
+  background: none;
+  color: var(--text2);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-family: inherit;
+  transition: color .15s, border-color .15s;
+}
+
+.admin-tab:hover:not(.active) { color: var(--text); }
+.admin-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+.admin-tab-panel { display: none; }
+.admin-tab-panel.active { display: block; }
+
+/* ── Users Admin Tab ───────────────────────────────────────────────────── */
+.users-admin-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.users-admin-search-row {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.user-search-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  border-radius: var(--r-sm);
+  padding: 9px 14px;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color .15s;
+}
+.user-search-input:focus { border-color: var(--primary); }
+.user-search-input::placeholder { color: var(--text3); }
+
+.users-admin-table-wrap {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.users-admin-thead,
+.users-admin-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 100px;
+  padding: 10px 16px;
+  font-size: 13px;
+  align-items: center;
+}
+
+.users-admin-thead {
+  position: sticky;
+  top: 0;
+  background: var(--surface3);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  z-index: 1;
+}
+
+.users-admin-row {
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .12s;
+}
+.users-admin-row:hover { background: var(--surface2); }
+.users-admin-row.selected {
+  background: rgba(99,102,241,.1);
+  border-left: 3px solid var(--primary);
+  padding-left: 13px;
+}
+
+/* ── Balance Adjust Panel ──────────────────────────────────────────────── */
+.users-adj-panel {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 14px;
-  padding: 14px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+}
+
+.adj-prompt {
+  color: var(--text3);
+  font-size: 13px;
+  text-align: center;
+  padding: 4px 0;
+}
+
+.adj-user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.adj-user-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.adj-user-bal {
+  margin-left: auto;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--yes);
+}
+
+.adj-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.adj-controls .amount-row {
+  flex: 1;
+  min-width: 140px;
 }
 
 /* ── Toast ─────────────────────────────────────────────────────────────── */

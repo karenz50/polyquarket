@@ -106,6 +106,8 @@ let currentUser = null;
 let activeView = 'login';
 let selectedMarketId = null;
 let selectedTradeSide = 'yes';
+let activeAdminTab = 'markets';
+let selectedAdjUser = null;
 
 // ── Storage ────────────────────────────────────────────────────────────────
 let _dbInitialized = false;
@@ -348,34 +350,6 @@ function deleteMarket(marketId) {
   syncCurrentUser();
   saveData();
   return { success: true };
-}
-
-// ── Export / Import ────────────────────────────────────────────────────────
-function exportJSON() {
-  const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url;
-  a.download = 'polyquarket.json';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function importJSON(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const data = JSON.parse(e.target.result);
-      if (!data.users || !data.markets) throw new Error('Invalid format.');
-      appData = data;
-      saveData();
-      showToast('Data imported successfully!', 'success');
-      renderAdmin();
-    } catch (err) {
-      showToast('Import failed: ' + err.message, 'error');
-    }
-  };
-  reader.readAsText(file);
 }
 
 // ── View Management ────────────────────────────────────────────────────────
@@ -652,101 +626,93 @@ function renderAdmin() {
     <div class="page-inner">
       <div class="page-hero">
         <h2 class="hero-title">Admin Panel</h2>
-        <p class="hero-sub">Manage markets and resolve outcomes</p>
+        <p class="hero-sub">Manage markets and users</p>
       </div>
 
-      <div class="admin-layout">
-        <!-- Left: create form -->
-        <div class="admin-form-wrap">
-          <h3 class="section-head">Create Market</h3>
-          <form id="add-form" class="admin-form">
-            <div class="field">
-              <label>Question *</label>
-              <input id="f-title" type="text" placeholder="Will X happen by Y?" maxlength="200">
-            </div>
-            <div class="field">
-              <label>Description / Resolution Criteria</label>
-              <textarea id="f-desc" rows="3" placeholder="How does this market resolve?"></textarea>
-            </div>
-            <div class="field">
-              <label>Category</label>
-              <select id="f-cat">
-                <option>Physics</option>
-                <option>Skits</option>
-                <option>Spherical Cow Awards</option>
-                <option>Random</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>End Date</label>
-              <input id="f-ends" type="date">
-            </div>
-            <div id="add-err" class="err-msg" style="display:none"></div>
-            <button type="submit" class="btn btn-primary w-full">Create Market</button>
-          </form>
+      <div class="admin-tabs">
+        <button class="admin-tab ${activeAdminTab === 'markets' ? 'active' : ''}" data-tab="markets">Markets</button>
+        <button class="admin-tab ${activeAdminTab === 'users' ? 'active' : ''}" data-tab="users">Users (${Object.keys(appData.users).length})</button>
+      </div>
 
-          <div class="json-actions">
-            <h3 class="section-head mt-6">Data</h3>
-            <p class="hint-txt">Data is synced live via Firebase. Export to save a local backup.</p>
-            <div class="btn-row">
-              <button class="btn btn-ghost" onclick="exportJSON()">⬇ Export</button>
-              <label class="btn btn-ghost" style="cursor:pointer">
-                ⬆ Import
-                <input type="file" accept=".json" style="display:none" onchange="importJSON(this.files[0])">
-              </label>
-            </div>
-          </div>
-
-          <div class="json-actions mt-6">
-            <h3 class="section-head">Users</h3>
-            <div class="users-table">
-              <div class="users-thead"><span>Username</span><span>Role</span><span>Balance</span></div>
-              ${Object.entries(appData.users).map(([name, u]) => `
-                <div class="users-row">
-                  <span>${esc(name)}</span>
-                  <span class="role-badge ${u.role}">${u.role}</span>
-                  <span>${fmt$(u.balance)}</span>
-                </div>
-              `).join('')}
-            </div>
-
-            <h3 class="section-head mt-6">Adjust Balance</h3>
-            <div class="balance-adj-form">
+      <!-- Markets Tab -->
+      <div id="admin-tab-markets" class="admin-tab-panel ${activeAdminTab === 'markets' ? 'active' : ''}">
+        <div class="admin-layout">
+          <div class="admin-form-wrap">
+            <h3 class="section-head">Create Market</h3>
+            <form id="add-form" class="admin-form">
               <div class="field">
-                <label>User</label>
-                <select id="adj-user">
-                  ${Object.keys(appData.users).map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}
+                <label>Question *</label>
+                <input id="f-title" type="text" placeholder="Will X happen by Y?" maxlength="200">
+              </div>
+              <div class="field">
+                <label>Description / Resolution Criteria</label>
+                <textarea id="f-desc" rows="3" placeholder="How does this market resolve?"></textarea>
+              </div>
+              <div class="field">
+                <label>Category</label>
+                <select id="f-cat">
+                  <option>Physics</option>
+                  <option>Skits</option>
+                  <option>Spherical Cow Awards</option>
+                  <option>Random</option>
                 </select>
               </div>
               <div class="field">
-                <label>Amount (use − to subtract)</label>
-                <div class="amount-row">
-                  <span class="amount-prefix">$</span>
-                  <input id="adj-amount" type="number" step="0.01" placeholder="0.00">
-                </div>
+                <label>End Date</label>
+                <input id="f-ends" type="date">
               </div>
-              <div id="adj-err" class="err-msg" style="display:none"></div>
-              <div class="btn-row">
-                <button class="btn btn-yes" id="adj-add-btn">+ Add</button>
-                <button class="btn btn-danger" id="adj-sub-btn">− Subtract</button>
-              </div>
+              <div id="add-err" class="err-msg" style="display:none"></div>
+              <button type="submit" class="btn btn-primary w-full">Create Market</button>
+            </form>
+          </div>
+
+          <div class="admin-list-wrap">
+            <h3 class="section-head">All Markets (${appData.markets.length})</h3>
+            <div id="admin-market-list">
+              ${appData.markets.length === 0 ? '<p class="hint-txt">No markets yet.</p>' :
+                appData.markets.map(adminMarketRow).join('')}
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Right: market list -->
-        <div class="admin-list-wrap">
-          <h3 class="section-head">All Markets (${appData.markets.length})</h3>
-          <div id="admin-market-list">
-            ${appData.markets.length === 0 ? '<p class="hint-txt">No markets yet.</p>' :
-              appData.markets.map(adminMarketRow).join('')}
+      <!-- Users Tab -->
+      <div id="admin-tab-users" class="admin-tab-panel ${activeAdminTab === 'users' ? 'active' : ''}">
+        <div class="users-admin-wrap">
+          <div class="users-admin-search-row">
+            <input id="user-search" type="text" placeholder="Search users by name…" class="user-search-input">
+          </div>
+          <div class="users-admin-table-wrap">
+            <div class="users-admin-thead">
+              <span>Username</span><span>Role</span><span>Balance</span>
+            </div>
+            <div id="users-admin-tbody">
+              ${usersAdminRows(Object.entries(appData.users))}
+            </div>
+          </div>
+          <div class="users-adj-panel" id="users-adj-panel">
+            ${adjPanelHTML()}
           </div>
         </div>
       </div>
     </div>
   `;
 
-  document.getElementById('add-form').addEventListener('submit', e => {
+  // ── Tab switching ──
+  document.querySelectorAll('.admin-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      activeAdminTab = tab.dataset.tab;
+      document.querySelectorAll('.admin-tab').forEach(t =>
+        t.classList.toggle('active', t.dataset.tab === activeAdminTab)
+      );
+      document.querySelectorAll('.admin-tab-panel').forEach(p =>
+        p.classList.toggle('active', p.id === `admin-tab-${activeAdminTab}`)
+      );
+    });
+  });
+
+  // ── Markets tab listeners ──
+  document.getElementById('add-form')?.addEventListener('submit', e => {
     e.preventDefault();
     const res = addMarket(
       document.getElementById('f-title').value,
@@ -764,26 +730,6 @@ function renderAdmin() {
       el.style.display = 'block';
     }
   });
-
-  function handleAdjust(sign) {
-    const username = document.getElementById('adj-user').value;
-    const raw = parseFloat(document.getElementById('adj-amount').value);
-    const errEl = document.getElementById('adj-err');
-    errEl.style.display = 'none';
-    if (!raw || raw <= 0) { errEl.textContent = 'Enter a positive amount.'; errEl.style.display = 'block'; return; }
-    const res = adjustBalance(username, sign * raw);
-    if (res.success) {
-      showToast(`Balance ${sign > 0 ? 'added' : 'subtracted'} for ${username}!`, 'success');
-      document.getElementById('adj-amount').value = '';
-      renderAdmin();
-      refreshHeader();
-    } else {
-      errEl.textContent = res.error;
-      errEl.style.display = 'block';
-    }
-  }
-  document.getElementById('adj-add-btn').addEventListener('click', () => handleAdjust(1));
-  document.getElementById('adj-sub-btn').addEventListener('click', () => handleAdjust(-1));
 
   document.querySelectorAll('.resolve-yes-btn').forEach(btn =>
     btn.addEventListener('click', e => {
@@ -814,6 +760,95 @@ function renderAdmin() {
       }
     })
   );
+
+  // ── Users tab listeners ──
+  document.getElementById('user-search')?.addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    const filtered = Object.entries(appData.users).filter(([name]) => name.toLowerCase().includes(q));
+    document.getElementById('users-admin-tbody').innerHTML = usersAdminRows(filtered);
+    bindUserRows();
+  });
+
+  bindUserRows();
+  bindAdjButtons();
+}
+
+function usersAdminRows(entries) {
+  if (!entries.length) return '<p class="hint-txt" style="padding:14px 16px">No users match.</p>';
+  return entries.map(([name, u]) => `
+    <div class="users-admin-row ${selectedAdjUser === name ? 'selected' : ''}" data-username="${esc(name)}">
+      <span class="uar-name">${esc(name)}</span>
+      <span class="role-badge ${u.role}">${u.role}</span>
+      <span>${fmt$(u.balance)}</span>
+    </div>
+  `).join('');
+}
+
+function adjPanelHTML() {
+  if (!selectedAdjUser || !appData.users[selectedAdjUser]) {
+    return '<p class="adj-prompt">Select a user above to adjust their balance.</p>';
+  }
+  const u = appData.users[selectedAdjUser];
+  return `
+    <div class="adj-user-info">
+      <span class="adj-user-name">${esc(selectedAdjUser)}</span>
+      <span class="adj-user-bal" id="adj-cur-bal">${fmt$(u.balance)}</span>
+    </div>
+    <div class="adj-controls">
+      <div class="amount-row">
+        <span class="amount-prefix">$</span>
+        <input id="adj-amount" type="number" step="0.01" placeholder="0.00" min="0.01">
+      </div>
+      <button class="btn btn-yes"    id="adj-add-btn">+ Add</button>
+      <button class="btn btn-danger" id="adj-sub-btn">− Subtract</button>
+    </div>
+    <div id="adj-err" class="err-msg" style="display:none"></div>
+  `;
+}
+
+function bindUserRows() {
+  document.querySelectorAll('.users-admin-row').forEach(row => {
+    row.addEventListener('click', () => {
+      selectedAdjUser = row.dataset.username;
+      document.querySelectorAll('.users-admin-row').forEach(r =>
+        r.classList.toggle('selected', r.dataset.username === selectedAdjUser)
+      );
+      document.getElementById('users-adj-panel').innerHTML = adjPanelHTML();
+      bindAdjButtons();
+    });
+  });
+}
+
+function bindAdjButtons() {
+  if (!selectedAdjUser) return;
+  const doAdjust = sign => {
+    const raw    = parseFloat(document.getElementById('adj-amount')?.value);
+    const errEl  = document.getElementById('adj-err');
+    errEl.style.display = 'none';
+    if (!raw || raw <= 0) {
+      errEl.textContent = 'Enter a positive amount.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const res = adjustBalance(selectedAdjUser, sign * raw);
+    if (res.success) {
+      showToast(`Balance updated for ${selectedAdjUser}!`, 'success');
+      document.getElementById('adj-amount').value = '';
+      const balEl = document.getElementById('adj-cur-bal');
+      if (balEl) balEl.textContent = fmt$(appData.users[selectedAdjUser].balance);
+      document.querySelectorAll('.users-admin-row').forEach(r => {
+        if (r.dataset.username === selectedAdjUser) {
+          r.querySelectorAll('span')[2].textContent = fmt$(appData.users[selectedAdjUser].balance);
+        }
+      });
+      refreshHeader();
+    } else {
+      errEl.textContent = res.error;
+      errEl.style.display = 'block';
+    }
+  };
+  document.getElementById('adj-add-btn')?.addEventListener('click', () => doAdjust(1));
+  document.getElementById('adj-sub-btn')?.addEventListener('click', () => doAdjust(-1));
 }
 
 function adminMarketRow(m) {
