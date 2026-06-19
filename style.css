@@ -760,6 +760,13 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
 }
 .hint-label { font-weight: 600; }
 
+.login-switch {
+  text-align: center;
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--text2);
+}
+
 /* ── Forms ─────────────────────────────────────────────────────────────── */
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .4px; }

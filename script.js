@@ -108,6 +108,7 @@ let selectedMarketId = null;
 let selectedTradeSide = 'yes';
 let activeAdminTab = 'markets';
 let selectedAdjUser = null;
+let loginMode = 'signin';
 
 // ── Storage ────────────────────────────────────────────────────────────────
 let _dbInitialized = false;
@@ -210,8 +211,42 @@ function login(username, password) {
 
 function logout() {
   currentUser = null;
+  loginMode = 'signin';
   clearSession();
   showView('login');
+}
+
+function register(email, username, password, confirmPassword) {
+  email    = email.trim().toLowerCase();
+  username = username.trim();
+
+  if (!email || !username || !password) {
+    return { success: false, error: 'All fields are required.' };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { success: false, error: 'Enter a valid email address.' };
+  }
+  if (password !== confirmPassword) {
+    return { success: false, error: 'Passwords do not match.' };
+  }
+  if (password.length < 4) {
+    return { success: false, error: 'Password must be at least 4 characters.' };
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return { success: false, error: 'Username may only contain letters, numbers, _ and -.' };
+  }
+  if (appData.users[username]) {
+    return { success: false, error: 'That username is already taken.' };
+  }
+  for (const u of Object.values(appData.users)) {
+    if (u.email && u.email === email) {
+      return { success: false, error: 'An account with that email already exists.' };
+    }
+  }
+
+  appData.users[username] = { email, password, role: 'user', balance: 670 };
+  saveData();
+  return { success: true };
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────
@@ -402,6 +437,8 @@ function refreshHeader() {
 
 // ── Render: Login ──────────────────────────────────────────────────────────
 function renderLogin() {
+  const isRegister = loginMode === 'register';
+
   document.getElementById('view-login').innerHTML = `
     <div class="login-wrap">
       <div class="login-card">
@@ -411,34 +448,77 @@ function renderLogin() {
         </div>
         <p class="login-tagline">Predict. Trade. Profit.</p>
 
-        <form id="login-form">
+        <form id="auth-form">
+          ${isRegister ? `
+            <div class="field">
+              <label>Email</label>
+              <input id="inp-email" type="email" placeholder="you@example.com" autocomplete="email">
+            </div>
+          ` : ''}
           <div class="field">
             <label>Username</label>
             <input id="inp-user" type="text" placeholder="username" autocomplete="username">
           </div>
           <div class="field">
             <label>Password</label>
-            <input id="inp-pass" type="password" placeholder="password" autocomplete="current-password">
+            <input id="inp-pass" type="password" placeholder="password"
+              autocomplete="${isRegister ? 'new-password' : 'current-password'}">
           </div>
-          <div id="login-err" class="err-msg" style="display:none"></div>
-          <button type="submit" class="btn btn-primary w-full mt-4">Sign In</button>
+          ${isRegister ? `
+            <div class="field">
+              <label>Confirm Password</label>
+              <input id="inp-pass2" type="password" placeholder="confirm password" autocomplete="new-password">
+            </div>
+          ` : ''}
+          <div id="auth-err" class="err-msg" style="display:none"></div>
+          <button type="submit" class="btn btn-primary w-full mt-4">
+            ${isRegister ? 'Create Account' : 'Sign In'}
+          </button>
         </form>
 
+        <p class="login-switch">
+          ${isRegister
+            ? 'Already have an account? <a href="#" id="switch-mode">Sign in</a>'
+            : 'New here? <a href="#" id="switch-mode">Create an account</a>'}
+        </p>
       </div>
     </div>
   `;
 
-  document.getElementById('login-form').addEventListener('submit', e => {
+  document.getElementById('switch-mode').addEventListener('click', e => {
     e.preventDefault();
-    const user = document.getElementById('inp-user').value.trim();
-    const pass = document.getElementById('inp-pass').value;
-    const res  = login(user, pass);
-    if (res.success) {
-      showView('markets');
+    loginMode = isRegister ? 'signin' : 'register';
+    renderLogin();
+  });
+
+  document.getElementById('auth-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const errEl = document.getElementById('auth-err');
+    errEl.style.display = 'none';
+
+    if (isRegister) {
+      const email  = document.getElementById('inp-email').value;
+      const user   = document.getElementById('inp-user').value;
+      const pass   = document.getElementById('inp-pass').value;
+      const pass2  = document.getElementById('inp-pass2').value;
+      const res    = register(email, user, pass, pass2);
+      if (res.success) {
+        login(user, pass);
+        showView('markets');
+      } else {
+        errEl.textContent = res.error;
+        errEl.style.display = 'block';
+      }
     } else {
-      const el = document.getElementById('login-err');
-      el.textContent = res.error;
-      el.style.display = 'block';
+      const user = document.getElementById('inp-user').value.trim();
+      const pass = document.getElementById('inp-pass').value;
+      const res  = login(user, pass);
+      if (res.success) {
+        showView('markets');
+      } else {
+        errEl.textContent = res.error;
+        errEl.style.display = 'block';
+      }
     }
   });
 }
