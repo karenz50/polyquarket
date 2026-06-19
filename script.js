@@ -247,6 +247,7 @@ function buyShares(marketId, side, rawAmount) {
   if (side === 'yes') market.yesPool = +((market.yesPool + spend).toFixed(2));
   else                market.noPool  = +((market.noPool  + spend).toFixed(2));
 
+  if (!ud.holdings) ud.holdings = {};
   if (!ud.holdings[marketId]) ud.holdings[marketId] = { yes: 0, no: 0 };
   ud.holdings[marketId][side] = +((ud.holdings[marketId][side] + spend).toFixed(2));
 
@@ -275,6 +276,17 @@ function resolveMarket(marketId, winner) {
     delete ud.holdings[marketId];
   }
 
+  syncCurrentUser();
+  saveData();
+  return { success: true };
+}
+
+function adjustBalance(username, delta) {
+  const ud = appData.users[username];
+  if (!ud) return { success: false, error: 'User not found.' };
+  const newBalance = +((ud.balance + delta).toFixed(2));
+  if (newBalance < 0) return { success: false, error: 'Balance cannot go below $0.' };
+  ud.balance = newBalance;
   syncCurrentUser();
   saveData();
   return { success: true };
@@ -677,6 +689,28 @@ function renderAdmin() {
                 </div>
               `).join('')}
             </div>
+
+            <h3 class="section-head mt-6">Adjust Balance</h3>
+            <div class="balance-adj-form">
+              <div class="field">
+                <label>User</label>
+                <select id="adj-user">
+                  ${Object.keys(appData.users).map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="field">
+                <label>Amount (use − to subtract)</label>
+                <div class="amount-row">
+                  <span class="amount-prefix">$</span>
+                  <input id="adj-amount" type="number" step="0.01" placeholder="0.00">
+                </div>
+              </div>
+              <div id="adj-err" class="err-msg" style="display:none"></div>
+              <div class="btn-row">
+                <button class="btn btn-yes" id="adj-add-btn">+ Add</button>
+                <button class="btn btn-danger" id="adj-sub-btn">− Subtract</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -710,6 +744,26 @@ function renderAdmin() {
       el.style.display = 'block';
     }
   });
+
+  function handleAdjust(sign) {
+    const username = document.getElementById('adj-user').value;
+    const raw = parseFloat(document.getElementById('adj-amount').value);
+    const errEl = document.getElementById('adj-err');
+    errEl.style.display = 'none';
+    if (!raw || raw <= 0) { errEl.textContent = 'Enter a positive amount.'; errEl.style.display = 'block'; return; }
+    const res = adjustBalance(username, sign * raw);
+    if (res.success) {
+      showToast(`Balance ${sign > 0 ? 'added' : 'subtracted'} for ${username}!`, 'success');
+      document.getElementById('adj-amount').value = '';
+      renderAdmin();
+      refreshHeader();
+    } else {
+      errEl.textContent = res.error;
+      errEl.style.display = 'block';
+    }
+  }
+  document.getElementById('adj-add-btn').addEventListener('click', () => handleAdjust(1));
+  document.getElementById('adj-sub-btn').addEventListener('click', () => handleAdjust(-1));
 
   document.querySelectorAll('.resolve-yes-btn').forEach(btn =>
     btn.addEventListener('click', e => {

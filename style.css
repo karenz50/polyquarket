@@ -858,6 +858,18 @@ select option { background: var(--surface2); }
 .mt-6   { margin-top: 24px; }
 .mt-8   { margin-top: 32px; }
 
+/* ── Balance Adjustment ────────────────────────────────────────────────── */
+.balance-adj-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
 /* ── Toast ─────────────────────────────────────────────────────────────── */
 #toast-wrap {
   position: fixed;
