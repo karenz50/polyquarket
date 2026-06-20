@@ -1200,6 +1200,7 @@ function renderExploreTab() {
   const datasets = markets.map((m, i) => ({
     label: trunc(m.title, 24),
     color: COLORS[i],
+    resolved: m.status === 'resolved',
     points: (m.history || []).map(h => ({ ts: h.ts, val: h.vol }))
   }));
 
@@ -1218,7 +1219,18 @@ function renderExploreTab() {
 }
 
 function buildChart(datasets, { yFmt = v => Math.round(v) + '' } = {}) {
-  const filled = datasets.filter(d => d.points.length > 0);
+  const now = new Date().toISOString();
+  const filled = datasets
+    .filter(d => d.points.length > 0)
+    .map(d => {
+      if (d.resolved) return d;
+      const sorted = [...d.points].sort((a, b) => new Date(a.ts) - new Date(b.ts));
+      const last = sorted[sorted.length - 1];
+      if (new Date(now) > new Date(last.ts)) {
+        return { ...d, points: [...d.points, { ts: now, val: last.val }] };
+      }
+      return d;
+    });
   if (!filled.length) {
     return '<div class="chart-empty">No history data yet.<br>Data will appear as trades are made.</div>';
   }

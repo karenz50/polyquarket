@@ -1333,3 +1333,123 @@ select option { background: var(--surface2); }
 ::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ── Mobile ────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Header: wrap into two rows */
+  #main-header {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px 16px;
+    gap: 8px;
+  }
+
+  .header-nav {
+    order: 3;
+    width: 100%;
+    flex: none;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .header-nav::-webkit-scrollbar { display: none; }
+
+  .nav-link {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 8px 14px;
+  }
+
+  .header-right { gap: 10px; }
+
+  /* Hide user info text — keep avatar */
+  .user-info { display: none; }
+  .user-chip  { padding: 4px 8px 4px 6px; }
+
+  /* Balance: hide label, shrink value */
+  .balance-label { display: none; }
+  .balance-val   { font-size: 13px; }
+
+  .view { min-height: calc(100vh - 102px); }
+
+  /* Page */
+  .page-inner { padding: 20px 16px 40px; }
+  .hero-title { font-size: 22px; }
+  .hero-sub   { font-size: 14px; }
+
+  /* Stat row */
+  .stat-row { gap: 8px; margin-bottom: 24px; }
+  .stat-box  { min-width: 90px; padding: 12px 14px; }
+  .stat-val.big { font-size: 24px; }
+
+  /* Market controls stack vertically */
+  .market-controls { flex-direction: column; }
+  .market-cat-select { min-width: 0; width: 100%; }
+
+  /* Market grid: single column */
+  .market-grid { grid-template-columns: 1fr; }
+
+  /* Modal: sheet from bottom */
+  #market-modal {
+    padding: 0;
+    align-items: flex-end;
+  }
+  #modal-content {
+    max-width: 100%;
+    border-radius: 20px 20px 0 0;
+    padding: 20px 18px 28px;
+    max-height: 92dvh;
+    overflow-y: auto;
+  }
+
+  /* Login card */
+  .login-card { padding: 28px 20px; }
+
+  /* Position sides stretch full width */
+  .pos-sides { flex-direction: column; }
+  .pos-side  { min-width: 0; }
+
+  /* Admin tabs & explore tabs: scrollable */
+  .admin-tabs,
+  .explore-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .admin-tabs::-webkit-scrollbar,
+  .explore-tabs::-webkit-scrollbar { display: none; }
+
+  .admin-tab,
+  .explore-tab {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 9px 16px;
+  }
+
+  /* Admin rows: stack actions below content */
+  .admin-row { flex-direction: column; }
+  .admin-row-actions { justify-content: flex-start; }
+
+  /* Users table: tighter columns */
+  .users-thead,
+  .users-row {
+    grid-template-columns: 1fr 64px 72px;
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+
+  .users-admin-thead,
+  .users-admin-row {
+    padding: 8px 12px;
+  }
+
+  /* Toast: full-width at bottom */
+  #toast-wrap { bottom: 16px; right: 16px; left: 16px; }
+  .toast      { max-width: 100%; }
+}
+
+/* Very small screens: hide brand text */
+@media (max-width: 380px) {
+  .header-brand span { display: none; }
+}
