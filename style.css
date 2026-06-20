@@ -1145,6 +1145,121 @@ select option { background: var(--surface2); }
 .toast-success { border-color: var(--yes-bdr); color: var(--yes); background: var(--yes-bg); }
 .toast-error   { border-color: var(--no-bdr);  color: var(--no);  background: var(--no-bg);  }
 
+/* ── Explore ───────────────────────────────────────────────────────────── */
+.explore-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 700px) {
+  .explore-grid { grid-template-columns: 1fr; }
+}
+
+.explore-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 20px 20px 8px;
+}
+
+.explore-section .section-head { margin-bottom: 4px; }
+
+.explore-list { display: flex; flex-direction: column; }
+
+.explore-market-row,
+.explore-user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  margin: 0 -8px;
+  border-bottom: 1px solid var(--border);
+}
+.explore-market-row:last-child,
+.explore-user-row:last-child { border-bottom: none; }
+
+.explore-market-row {
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition: background .12s;
+}
+.explore-market-row:hover { background: var(--surface2); }
+
+.explore-rank {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text3);
+  min-width: 26px;
+  flex-shrink: 0;
+}
+
+.explore-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.explore-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.explore-row-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.explore-pct {
+  font-size: 14px;
+  font-weight: 800;
+}
+.explore-pct.yes { color: var(--yes); }
+.explore-pct.no  { color: var(--no);  }
+
+.explore-stat {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.explore-username {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.explore-bal {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--yes);
+  flex-shrink: 0;
+}
+
+.explore-user-row.is-you .explore-username { color: var(--primary); }
+
+.you-tag {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(99,102,241,.2);
+  color: var(--primary);
+  padding: 1px 6px;
+  border-radius: 20px;
+}
+
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }

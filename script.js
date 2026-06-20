@@ -175,6 +175,7 @@ function startRealtimeListener() {
     if (currentUser) {
       switch (activeView) {
         case 'markets':   renderMarkets();   break;
+        case 'explore':   renderExplore();   break;
         case 'portfolio': renderPortfolio(); break;
         case 'admin':     renderAdmin();     break;
       }
@@ -402,7 +403,7 @@ function deleteMarket(marketId) {
 
 // ── View Management ────────────────────────────────────────────────────────
 function showView(view) {
-  if ((view === 'admin' || view === 'portfolio' || view === 'markets') && !currentUser) {
+  if ((view === 'admin' || view === 'portfolio' || view === 'markets' || view === 'explore') && !currentUser) {
     view = 'login';
   }
   if (view === 'admin' && currentUser?.role !== 'admin') {
@@ -437,6 +438,7 @@ function showView(view) {
   switch (view) {
     case 'login':     renderLogin();     break;
     case 'markets':   renderMarkets();   break;
+    case 'explore':   renderExplore();   break;
     case 'portfolio': renderPortfolio(); break;
     case 'admin':     renderAdmin();     break;
   }
@@ -1091,6 +1093,119 @@ function adminMarketRow(m) {
         ` : ''}
         <button class="btn btn-danger delete-market-btn" data-id="${m.id}">Delete</button>
       </div>
+    </div>
+  `;
+}
+
+// ── Render: Explore ────────────────────────────────────────────────────────
+function renderExplore() {
+  const trending = [...appData.markets]
+    .filter(m => m.status === 'open')
+    .sort((a, b) => (b.yesPool + b.noPool) - (a.yesPool + a.noPool))
+    .slice(0, 10);
+
+  const newest = [...appData.markets]
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 10);
+
+  const topUsers = Object.entries(appData.users)
+    .filter(([, u]) => u.role !== 'admin')
+    .sort(([, a], [, b]) => b.balance - a.balance)
+    .slice(0, 10);
+
+  const topOverall = [...appData.markets]
+    .sort((a, b) => (b.yesPool + b.noPool) - (a.yesPool + a.noPool))
+    .slice(0, 10);
+
+  document.getElementById('view-explore').innerHTML = `
+    <div class="page-inner">
+      <div class="page-hero">
+        <h2 class="hero-title">Explore</h2>
+        <p class="hero-sub">Discover trending markets and top performers</p>
+      </div>
+
+      <div class="explore-grid">
+        <div class="explore-section">
+          <h3 class="section-head">Trending Markets</h3>
+          <div class="explore-list">
+            ${trending.length
+              ? trending.map((m, i) => exploreMarketRow(m, i + 1, 'trending')).join('')
+              : '<p class="hint-txt">No open markets yet.</p>'}
+          </div>
+        </div>
+
+        <div class="explore-section">
+          <h3 class="section-head">Top Overall</h3>
+          <div class="explore-list">
+            ${topOverall.length
+              ? topOverall.map((m, i) => exploreMarketRow(m, i + 1, 'volume')).join('')
+              : '<p class="hint-txt">No markets yet.</p>'}
+          </div>
+        </div>
+
+        <div class="explore-section">
+          <h3 class="section-head">Top Users</h3>
+          <div class="explore-list">
+            ${topUsers.length
+              ? topUsers.map(([name, u], i) => exploreUserRow(name, u, i + 1)).join('')
+              : '<p class="hint-txt">No users yet.</p>'}
+          </div>
+        </div>
+
+        <div class="explore-section">
+          <h3 class="section-head">New Markets</h3>
+          <div class="explore-list">
+            ${newest.length
+              ? newest.map((m, i) => exploreMarketRow(m, i + 1, 'new')).join('')
+              : '<p class="hint-txt">No markets yet.</p>'}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.querySelectorAll('.explore-market-row').forEach(row => {
+    row.addEventListener('click', () => openModal(row.dataset.id));
+  });
+}
+
+function exploreMarketRow(m, rank, variant) {
+  const vol   = m.yesPool + m.noPool;
+  const yp    = yesPrice(m);
+  const color = CAT_COLORS[m.category] || '#6b7280';
+
+  const rightTop = variant === 'new'
+    ? `<span class="status-badge ${m.status}">${m.status}</span>`
+    : `<span class="explore-pct ${yp >= 0.5 ? 'yes' : 'no'}">${fmtPct(yp)}</span>`;
+
+  const rightSub = variant === 'new'
+    ? `<span class="explore-stat">${m.createdAt}</span>`
+    : `<span class="explore-stat">Vol ${fmt$(vol)}</span>`;
+
+  return `
+    <div class="explore-market-row" data-id="${m.id}">
+      <span class="explore-rank">#${rank}</span>
+      <div class="explore-row-info">
+        <span class="cat-badge" style="color:${color};background:${color}22">${esc(m.category)}</span>
+        <p class="explore-row-title">${esc(m.title)}</p>
+      </div>
+      <div class="explore-row-right">
+        ${rightTop}
+        ${rightSub}
+      </div>
+    </div>
+  `;
+}
+
+function exploreUserRow(name, u, rank) {
+  const isYou = currentUser && currentUser.username === name;
+  return `
+    <div class="explore-user-row ${isYou ? 'is-you' : ''}">
+      <span class="explore-rank">#${rank}</span>
+      <span class="explore-username">
+        ${esc(name)}${isYou ? '<span class="you-tag">you</span>' : ''}
+      </span>
+      <span class="explore-bal">${fmt$(u.balance)}</span>
     </div>
   `;
 }
