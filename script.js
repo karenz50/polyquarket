@@ -110,6 +110,8 @@ let selectedTradeSide = 'yes';
 let activeAdminTab = 'markets';
 let selectedAdjUser = null;
 let loginMode = 'signin';
+let marketSearch = '';
+let marketCategoryFilter = 'all';
 
 // ── Storage ────────────────────────────────────────────────────────────────
 let _dbInitialized = false;
@@ -570,9 +572,10 @@ function renderLogin() {
 
 // ── Render: Markets ────────────────────────────────────────────────────────
 function renderMarkets() {
-  const open     = appData.markets.filter(m => m.status === 'open');
-  const resolved = appData.markets.filter(m => m.status === 'resolved');
-  const totalVol = appData.markets.reduce((s, m) => s + m.yesPool + m.noPool, 0);
+  const allCategories = [...new Set(appData.markets.map(m => m.category))].sort();
+  const totalVol      = appData.markets.reduce((s, m) => s + m.yesPool + m.noPool, 0);
+  const openCount     = appData.markets.filter(m => m.status === 'open').length;
+  const resolvedCount = appData.markets.filter(m => m.status === 'resolved').length;
 
   document.getElementById('view-markets').innerHTML = `
     <div class="page-inner">
@@ -583,7 +586,7 @@ function renderMarkets() {
 
       <div class="stat-row">
         <div class="stat-box">
-          <div class="stat-val">${open.length}</div>
+          <div class="stat-val">${openCount}</div>
           <div class="stat-lbl">Open Markets</div>
         </div>
         <div class="stat-box">
@@ -591,28 +594,83 @@ function renderMarkets() {
           <div class="stat-lbl">Total Volume</div>
         </div>
         <div class="stat-box">
-          <div class="stat-val">${resolved.length}</div>
+          <div class="stat-val">${resolvedCount}</div>
           <div class="stat-lbl">Resolved</div>
         </div>
       </div>
 
-      ${open.length ? `
-        <h3 class="section-head">Open Markets</h3>
-        <div class="market-grid">
-          ${open.map(marketCard).join('')}
+      <div class="market-controls">
+        <div class="market-search-wrap">
+          <input id="market-search" class="market-search-input" type="text" placeholder="Search markets…">
         </div>
-      ` : `<div class="empty-state"><p>No open markets yet.</p>${currentUser?.role === 'admin' ? '<p>Create one in the <a href="#" onclick="showView(\'admin\')">Admin panel</a>.</p>' : ''}</div>`}
+        <select id="market-cat-filter" class="market-cat-select">
+          <option value="all">All Categories</option>
+          ${allCategories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+        </select>
+      </div>
 
-      ${resolved.length ? `
-        <h3 class="section-head mt-8">Resolved Markets</h3>
-        <div class="market-grid">
-          ${resolved.map(marketCard).join('')}
-        </div>
-      ` : ''}
+      <div id="market-list-container"></div>
     </div>
   `;
 
-  document.querySelectorAll('.market-card').forEach(card => {
+  const searchEl = document.getElementById('market-search');
+  const catEl    = document.getElementById('market-cat-filter');
+  searchEl.value = marketSearch;
+  catEl.value    = marketCategoryFilter;
+
+  searchEl.addEventListener('input', e => {
+    marketSearch = e.target.value;
+    applyMarketFilters();
+  });
+  catEl.addEventListener('change', e => {
+    marketCategoryFilter = e.target.value;
+    applyMarketFilters();
+  });
+
+  applyMarketFilters();
+}
+
+function applyMarketFilters() {
+  let filtered = appData.markets;
+  if (marketSearch) {
+    const q = marketSearch.toLowerCase();
+    filtered = filtered.filter(m =>
+      m.title.toLowerCase().includes(q) ||
+      (m.description || '').toLowerCase().includes(q)
+    );
+  }
+  if (marketCategoryFilter !== 'all') {
+    filtered = filtered.filter(m => m.category === marketCategoryFilter);
+  }
+
+  const open     = filtered.filter(m => m.status === 'open');
+  const resolved = filtered.filter(m => m.status === 'resolved');
+  const container = document.getElementById('market-list-container');
+  if (!container) return;
+
+  const hasFilters = marketSearch || marketCategoryFilter !== 'all';
+
+  container.innerHTML = `
+    ${open.length ? `
+      <h3 class="section-head">Open Markets</h3>
+      <div class="market-grid">
+        ${open.map(marketCard).join('')}
+      </div>
+    ` : !hasFilters ? `<div class="empty-state"><p>No open markets yet.</p>${currentUser?.role === 'admin' ? '<p>Create one in the <a href="#" onclick="showView(\'admin\')">Admin panel</a>.</p>' : ''}</div>` : ''}
+
+    ${resolved.length ? `
+      <h3 class="section-head mt-8">Resolved Markets</h3>
+      <div class="market-grid">
+        ${resolved.map(marketCard).join('')}
+      </div>
+    ` : ''}
+
+    ${!open.length && !resolved.length && hasFilters ? `
+      <div class="empty-state"><p>No markets match your search.</p></div>
+    ` : ''}
+  `;
+
+  container.querySelectorAll('.market-card').forEach(card => {
     card.addEventListener('click', () => openModal(card.dataset.id));
   });
 }

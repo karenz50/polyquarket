@@ -199,6 +199,46 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
 /* ── Section Heading ───────────────────────────────────────────────────── */
 .section-head { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
 
+/* ── Market Controls ───────────────────────────────────────────────────── */
+.market-controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+
+.market-search-wrap {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  transition: border-color .15s;
+}
+.market-search-wrap:focus-within { border-color: var(--primary); }
+
+.market-search-input {
+  flex: 1;
+  background: none !important;
+  border: none !important;
+  color: var(--text);
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+  font-family: inherit;
+  width: 100%;
+}
+.market-search-input::placeholder { color: var(--text3); }
+
+.market-cat-select {
+  min-width: 180px;
+  width: auto;
+  flex-shrink: 0;
+}
+
 /* ── Market Grid ───────────────────────────────────────────────────────── */
 .market-grid {
   display: grid;
