@@ -113,6 +113,7 @@ let loginMode = 'signin';
 let marketSearch = '';
 let marketCategoryFilter = 'all';
 let activeExploreTab = 'trending';
+let exploreChartFilter = 'all';
 
 // ── Storage ────────────────────────────────────────────────────────────────
 let _dbInitialized = false;
@@ -236,6 +237,7 @@ function logout() {
   loginMode = 'signin';
   marketSearch = '';
   marketCategoryFilter = 'all';
+  exploreChartFilter = 'all';
   clearSession();
   showView('login');
 }
@@ -1171,16 +1173,19 @@ function renderExploreTab() {
     const datasets = top.map(([name, u], i) => ({
       label: name,
       color: COLORS[i],
-      points: (u.history || []).map(h => ({ ts: h.ts, val: h.bal }))
+      points: filterPoints((u.history || []).map(h => ({ ts: h.ts, val: h.bal })), exploreChartFilter)
     }));
     content.innerHTML = `
       <div class="explore-panel-layout">
         <div class="explore-panel-list">
           ${top.length ? top.map(([name, u], i) => exploreUserRow(name, u, i + 1)).join('') : '<p class="hint-txt" style="padding:16px">No users yet.</p>'}
         </div>
-        <div class="explore-panel-chart">${buildChart(datasets, { yFmt })}</div>
+        <div class="explore-panel-chart">${chartFiltersHTML()}${buildChart(datasets, { yFmt })}</div>
       </div>
     `;
+    content.querySelectorAll('.chart-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => { exploreChartFilter = btn.dataset.filter; renderExploreTab(); });
+    });
     return;
   }
 
@@ -1201,7 +1206,7 @@ function renderExploreTab() {
     label: trunc(m.title, 24),
     color: COLORS[i],
     resolved: m.status === 'resolved',
-    points: (m.history || []).map(h => ({ ts: h.ts, val: h.vol }))
+    points: filterPoints((m.history || []).map(h => ({ ts: h.ts, val: h.vol })), exploreChartFilter)
   }));
 
   content.innerHTML = `
@@ -1209,13 +1214,41 @@ function renderExploreTab() {
       <div class="explore-panel-list">
         ${markets.length ? markets.map((m, i) => exploreMarketRow(m, i + 1, variant)).join('') : '<p class="hint-txt" style="padding:16px">No markets yet.</p>'}
       </div>
-      <div class="explore-panel-chart">${buildChart(datasets, { yFmt })}</div>
+      <div class="explore-panel-chart">${chartFiltersHTML()}${buildChart(datasets, { yFmt })}</div>
     </div>
   `;
 
   content.querySelectorAll('.explore-market-row').forEach(row => {
     row.addEventListener('click', () => openModal(row.dataset.id));
   });
+  content.querySelectorAll('.chart-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => { exploreChartFilter = btn.dataset.filter; renderExploreTab(); });
+  });
+}
+
+function filterPoints(points, filter) {
+  if (filter === 'all') return points;
+  const cutoffs = { '1h': 3600000, '1d': 86400000, '1w': 604800000, '1m': 2592000000 };
+  const cutoffTs = Date.now() - cutoffs[filter];
+  const sorted = [...points].sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  const inWindow = sorted.filter(p => new Date(p.ts).getTime() >= cutoffTs);
+  const before   = sorted.filter(p => new Date(p.ts).getTime() <  cutoffTs);
+  if (before.length > 0) {
+    const anchor = { ...before[before.length - 1], ts: new Date(cutoffTs).toISOString() };
+    return [anchor, ...inWindow];
+  }
+  return inWindow;
+}
+
+function chartFiltersHTML() {
+  const filters = [
+    { key: '1h', label: '1H' }, { key: '1d', label: '1D' },
+    { key: '1w', label: '1W' }, { key: '1m', label: '1M' },
+    { key: 'all', label: 'All' },
+  ];
+  return `<div class="chart-filters">${filters.map(f =>
+    `<button class="chart-filter-btn ${exploreChartFilter === f.key ? 'active' : ''}" data-filter="${f.key}">${f.label}</button>`
+  ).join('')}</div>`;
 }
 
 function buildChart(datasets, { yFmt = v => Math.round(v) + '' } = {}) {

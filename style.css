@@ -1279,6 +1279,28 @@ select option { background: var(--surface2); }
   border-radius: 20px;
 }
 
+/* ── Chart Filters ─────────────────────────────────────────────────────── */
+.chart-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.chart-filter-btn {
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border2);
+  background: var(--surface3);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.chart-filter-btn:hover  { background: var(--border2); color: var(--text); }
+.chart-filter-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
 /* ── Chart ─────────────────────────────────────────────────────────────── */
 .chart-wrap { display: flex; flex-direction: column; gap: 14px; }
 .chart-svg  { width: 100%; height: auto; display: block; }
