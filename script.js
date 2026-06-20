@@ -219,6 +219,8 @@ function login(username, password) {
 function logout() {
   currentUser = null;
   loginMode = 'signin';
+  marketSearch = '';
+  marketCategoryFilter = 'all';
   clearSession();
   showView('login');
 }
