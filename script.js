@@ -7,7 +7,7 @@ const db = firebase.database();
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SESSION_KEY = 'polyquarket_session_v3';
-const CURRENT_DATA_VERSION = 1;
+const CURRENT_DATA_VERSION = 2;
 
 
 const DEFAULT_DATA = {
@@ -112,6 +112,7 @@ let selectedAdjUser = null;
 let loginMode = 'signin';
 let marketSearch = '';
 let marketCategoryFilter = 'all';
+let activeExploreTab = 'trending';
 
 // ── Storage ────────────────────────────────────────────────────────────────
 let _dbInitialized = false;
@@ -126,9 +127,22 @@ function deepCopy(obj) {
 
 function applyMigrations(fromVersion) {
   if (fromVersion < 1) {
-    // v1: reset all user balances to 670
     for (const ud of Object.values(appData.users)) {
       ud.balance = 670;
+    }
+  }
+  if (fromVersion < 2) {
+    const now = new Date().toISOString();
+    for (const market of appData.markets) {
+      if (!market.history) {
+        const startTs = market.createdAt ? market.createdAt + 'T00:00:00.000Z' : now;
+        market.history = [{ ts: startTs, vol: +(market.yesPool + market.noPool).toFixed(2) }];
+      }
+    }
+    for (const ud of Object.values(appData.users)) {
+      if (!ud.history) {
+        ud.history = [{ ts: now, bal: ud.balance }];
+      }
     }
   }
   if (!appData.meta) appData.meta = {};
@@ -254,7 +268,7 @@ function register(email, username, password, confirmPassword) {
     }
   }
 
-  appData.users[username] = { email, password, role: 'user', balance: 670 };
+  appData.users[username] = { email, password, role: 'user', balance: 670, history: [{ ts: new Date().toISOString(), bal: 670 }] };
   saveData();
   return { success: true };
 }
@@ -310,9 +324,13 @@ function buyShares(marketId, side, rawAmount) {
 
   const spend = Math.min(amount, ud.balance);
   ud.balance = +((ud.balance - spend).toFixed(2));
+  if (!ud.history) ud.history = [];
+  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance });
 
   if (side === 'yes') market.yesPool = +((market.yesPool + spend).toFixed(2));
   else                market.noPool  = +((market.noPool  + spend).toFixed(2));
+  if (!market.history) market.history = [];
+  market.history.push({ ts: new Date().toISOString(), vol: +(market.yesPool + market.noPool).toFixed(2) });
 
   if (!ud.holdings) ud.holdings = {};
   if (!ud.holdings[marketId]) ud.holdings[marketId] = { yes: 0, no: 0 };
@@ -333,12 +351,15 @@ function resolveMarket(marketId, winner) {
   const total       = market.yesPool + market.noPool;
   const winningPool = winner === 'yes' ? market.yesPool : market.noPool;
 
+  const resolvedAt = new Date().toISOString();
   for (const [, ud] of Object.entries(appData.users)) {
     const h = (ud.holdings || {})[marketId];
     if (!h) continue;
     const bet = h[winner] || 0;
     if (bet > 0 && winningPool > 0) {
       ud.balance = +((ud.balance + (bet / winningPool) * total).toFixed(2));
+      if (!ud.history) ud.history = [];
+      ud.history.push({ ts: resolvedAt, bal: ud.balance });
     }
     delete ud.holdings[marketId];
   }
@@ -354,6 +375,8 @@ function adjustBalance(username, delta) {
   const newBalance = +((ud.balance + delta).toFixed(2));
   if (newBalance < 0) return { success: false, error: 'Balance cannot go below $0.' };
   ud.balance = newBalance;
+  if (!ud.history) ud.history = [];
+  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance });
   syncCurrentUser();
   saveData();
   return { success: true };
@@ -373,7 +396,8 @@ function addMarket(title, description, category, endsAt, yesPool, noPool) {
     yesPool: +yp.toFixed(2), noPool: +np.toFixed(2),
     status: 'open', winner: null,
     createdAt: new Date().toISOString().slice(0, 10),
-    endsAt: endsAt || ''
+    endsAt: endsAt || '',
+    history: [{ ts: new Date().toISOString(), vol: +(yp + np).toFixed(2) }]
   };
   appData.markets.unshift(market);
   saveData();
@@ -386,10 +410,13 @@ function deleteMarket(marketId) {
 
   const market = appData.markets[idx];
   if (market.status === 'open') {
+    const deletedAt = new Date().toISOString();
     for (const [, ud] of Object.entries(appData.users)) {
       const h = (ud.holdings || {})[marketId];
       if (h) {
         ud.balance = +((ud.balance + (h.yes || 0) + (h.no || 0)).toFixed(2));
+        if (!ud.history) ud.history = [];
+        ud.history.push({ ts: deletedAt, bal: ud.balance });
         delete ud.holdings[marketId];
       }
     }
@@ -1099,74 +1126,168 @@ function adminMarketRow(m) {
 
 // ── Render: Explore ────────────────────────────────────────────────────────
 function renderExplore() {
-  const trending = [...appData.markets]
-    .filter(m => m.status === 'open')
-    .sort((a, b) => (b.yesPool + b.noPool) - (a.yesPool + a.noPool))
-    .slice(0, 10);
-
-  const newest = [...appData.markets]
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, 10);
-
-  const topUsers = Object.entries(appData.users)
-    .filter(([, u]) => u.role !== 'admin')
-    .sort(([, a], [, b]) => b.balance - a.balance)
-    .slice(0, 10);
-
-  const topOverall = [...appData.markets]
-    .sort((a, b) => (b.yesPool + b.noPool) - (a.yesPool + a.noPool))
-    .slice(0, 10);
-
   document.getElementById('view-explore').innerHTML = `
     <div class="page-inner">
       <div class="page-hero">
         <h2 class="hero-title">Explore</h2>
         <p class="hero-sub">Discover trending markets and top performers</p>
       </div>
-
-      <div class="explore-grid">
-        <div class="explore-section">
-          <h3 class="section-head">Trending Markets</h3>
-          <div class="explore-list">
-            ${trending.length
-              ? trending.map((m, i) => exploreMarketRow(m, i + 1, 'trending')).join('')
-              : '<p class="hint-txt">No open markets yet.</p>'}
-          </div>
-        </div>
-
-        <div class="explore-section">
-          <h3 class="section-head">Top Overall</h3>
-          <div class="explore-list">
-            ${topOverall.length
-              ? topOverall.map((m, i) => exploreMarketRow(m, i + 1, 'volume')).join('')
-              : '<p class="hint-txt">No markets yet.</p>'}
-          </div>
-        </div>
-
-        <div class="explore-section">
-          <h3 class="section-head">Top Users</h3>
-          <div class="explore-list">
-            ${topUsers.length
-              ? topUsers.map(([name, u], i) => exploreUserRow(name, u, i + 1)).join('')
-              : '<p class="hint-txt">No users yet.</p>'}
-          </div>
-        </div>
-
-        <div class="explore-section">
-          <h3 class="section-head">New Markets</h3>
-          <div class="explore-list">
-            ${newest.length
-              ? newest.map((m, i) => exploreMarketRow(m, i + 1, 'new')).join('')
-              : '<p class="hint-txt">No markets yet.</p>'}
-          </div>
-        </div>
+      <div class="explore-tabs">
+        <button class="explore-tab ${activeExploreTab === 'trending' ? 'active' : ''}" data-etab="trending">Trending</button>
+        <button class="explore-tab ${activeExploreTab === 'overall'  ? 'active' : ''}" data-etab="overall">Top Overall</button>
+        <button class="explore-tab ${activeExploreTab === 'users'    ? 'active' : ''}" data-etab="users">Top Users</button>
+        <button class="explore-tab ${activeExploreTab === 'new'      ? 'active' : ''}" data-etab="new">New Markets</button>
       </div>
+      <div id="explore-content"></div>
     </div>
   `;
 
-  document.querySelectorAll('.explore-market-row').forEach(row => {
+  document.querySelectorAll('.explore-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      activeExploreTab = tab.dataset.etab;
+      document.querySelectorAll('.explore-tab').forEach(t =>
+        t.classList.toggle('active', t.dataset.etab === activeExploreTab)
+      );
+      renderExploreTab();
+    });
+  });
+
+  renderExploreTab();
+}
+
+function renderExploreTab() {
+  const COLORS = ['#6366f1','#22c55e','#ef4444','#f59e0b','#0ea5e9','#7c3aed','#ec4899','#14b8a6','#f97316','#84cc16'];
+  const content = document.getElementById('explore-content');
+  if (!content) return;
+
+  const trunc = (s, n) => s.length > n ? s.slice(0, n) + '…' : s;
+  const yFmt  = v => Math.abs(v) >= 1000 ? '$' + (v / 1000).toFixed(1) + 'k' : '$' + Math.round(v);
+
+  if (activeExploreTab === 'users') {
+    const top = Object.entries(appData.users)
+      .filter(([, u]) => u.role !== 'admin')
+      .sort(([, a], [, b]) => b.balance - a.balance)
+      .slice(0, 10);
+    const datasets = top.map(([name, u], i) => ({
+      label: name,
+      color: COLORS[i],
+      points: (u.history || []).map(h => ({ ts: h.ts, val: h.bal }))
+    }));
+    content.innerHTML = `
+      <div class="explore-panel-layout">
+        <div class="explore-panel-list">
+          ${top.length ? top.map(([name, u], i) => exploreUserRow(name, u, i + 1)).join('') : '<p class="hint-txt" style="padding:16px">No users yet.</p>'}
+        </div>
+        <div class="explore-panel-chart">${buildChart(datasets, { yFmt })}</div>
+      </div>
+    `;
+    return;
+  }
+
+  let markets = [...appData.markets];
+  let variant = 'volume';
+
+  if (activeExploreTab === 'trending') {
+    markets = markets.filter(m => m.status === 'open').sort((a, b) => (b.yesPool + b.noPool) - (a.yesPool + a.noPool));
+  } else if (activeExploreTab === 'overall') {
+    markets = markets.sort((a, b) => (b.yesPool + b.noPool) - (a.yesPool + a.noPool));
+  } else {
+    markets = markets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    variant = 'new';
+  }
+  markets = markets.slice(0, 10);
+
+  const datasets = markets.map((m, i) => ({
+    label: trunc(m.title, 24),
+    color: COLORS[i],
+    points: (m.history || []).map(h => ({ ts: h.ts, val: h.vol }))
+  }));
+
+  content.innerHTML = `
+    <div class="explore-panel-layout">
+      <div class="explore-panel-list">
+        ${markets.length ? markets.map((m, i) => exploreMarketRow(m, i + 1, variant)).join('') : '<p class="hint-txt" style="padding:16px">No markets yet.</p>'}
+      </div>
+      <div class="explore-panel-chart">${buildChart(datasets, { yFmt })}</div>
+    </div>
+  `;
+
+  content.querySelectorAll('.explore-market-row').forEach(row => {
     row.addEventListener('click', () => openModal(row.dataset.id));
   });
+}
+
+function buildChart(datasets, { yFmt = v => Math.round(v) + '' } = {}) {
+  const filled = datasets.filter(d => d.points.length > 0);
+  if (!filled.length) {
+    return '<div class="chart-empty">No history data yet.<br>Data will appear as trades are made.</div>';
+  }
+
+  const W = 540, H = 240;
+  const ML = 56, MR = 16, MT = 14, MB = 38;
+  const plotW = W - ML - MR, plotH = H - MT - MB;
+
+  const allPts = filled.flatMap(d => d.points);
+  const minTs  = Math.min(...allPts.map(p => new Date(p.ts).getTime()));
+  const maxTs  = Math.max(...allPts.map(p => new Date(p.ts).getTime()));
+  const minVal = Math.min(...allPts.map(p => p.val));
+  const maxVal = Math.max(...allPts.map(p => p.val));
+
+  const tsRange = maxTs - minTs || 3600000;
+  const valPad  = (maxVal - minVal) * 0.14 || maxVal * 0.1 || 50;
+  const vMin    = minVal - valPad;
+  const vMax    = maxVal + valPad;
+  const vRange  = vMax - vMin;
+
+  const tx = ts  => ML + ((new Date(ts).getTime() - minTs) / tsRange) * plotW;
+  const ty = val => MT + plotH - ((val - vMin) / vRange) * plotH;
+
+  let grid = '', yLbls = '';
+  for (let i = 0; i <= 4; i++) {
+    const v = vMin + vRange * i / 4;
+    const y = ty(v).toFixed(1);
+    grid  += `<line x1="${ML}" y1="${y}" x2="${W - MR}" y2="${y}" class="chart-grid"/>`;
+    yLbls += `<text x="${ML - 7}" y="${(parseFloat(y) + 4).toFixed(1)}" text-anchor="end" class="chart-lbl">${yFmt(v)}</text>`;
+  }
+
+  const shortRange = tsRange < 172800000;
+  let xLbls = '';
+  for (let i = 0; i <= 4; i++) {
+    const t = minTs + tsRange * i / 4;
+    const x = (ML + plotW * i / 4).toFixed(1);
+    const d = new Date(t);
+    const lbl = shortRange
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : `${d.getMonth() + 1}/${d.getDate()}`;
+    xLbls += `<text x="${x}" y="${(H - MB + 16).toFixed(1)}" text-anchor="middle" class="chart-lbl">${lbl}</text>`;
+  }
+
+  let paths = '', dots = '';
+  for (const { color, points } of filled) {
+    const sorted = [...points].sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    if (sorted.length === 1) {
+      dots += `<circle cx="${tx(sorted[0].ts).toFixed(1)}" cy="${ty(sorted[0].val).toFixed(1)}" r="4" fill="${color}"/>`;
+    } else {
+      const d = sorted.map((p, j) => `${j ? 'L' : 'M'}${tx(p.ts).toFixed(1)},${ty(p.val).toFixed(1)}`).join('');
+      paths += `<path d="${d}" stroke="${color}" stroke-width="2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>`;
+      const last = sorted[sorted.length - 1];
+      dots += `<circle cx="${tx(last.ts).toFixed(1)}" cy="${ty(last.val).toFixed(1)}" r="3.5" fill="${color}"/>`;
+    }
+  }
+
+  const legend = filled.map(({ color, label }) =>
+    `<span class="chart-leg-item"><span class="chart-leg-dot" style="background:${color}"></span><span class="chart-leg-txt">${esc(label)}</span></span>`
+  ).join('');
+
+  return `<div class="chart-wrap">
+    <svg viewBox="0 0 ${W} ${H}" class="chart-svg" xmlns="http://www.w3.org/2000/svg">
+      ${grid}
+      <line x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT + plotH}" class="chart-axis"/>
+      <line x1="${ML}" y1="${MT + plotH}" x2="${W - MR}" y2="${MT + plotH}" class="chart-axis"/>
+      ${yLbls}${xLbls}${paths}${dots}
+    </svg>
+    <div class="chart-legend">${legend}</div>
+  </div>`;
 }
 
 function exploreMarketRow(m, rank, variant) {

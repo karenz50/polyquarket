@@ -1146,34 +1146,60 @@ select option { background: var(--surface2); }
 .toast-error   { border-color: var(--no-bdr);  color: var(--no);  background: var(--no-bg);  }
 
 /* ── Explore ───────────────────────────────────────────────────────────── */
-.explore-grid {
+.explore-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.explore-tab {
+  padding: 9px 22px;
+  border: none;
+  background: none;
+  color: var(--text2);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-family: inherit;
+  transition: color .15s, border-color .15s;
+}
+.explore-tab:hover:not(.active) { color: var(--text); }
+.explore-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+.explore-panel-layout {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 300px 1fr;
   gap: 20px;
+  align-items: start;
 }
 
-@media (max-width: 700px) {
-  .explore-grid { grid-template-columns: 1fr; }
+@media (max-width: 820px) {
+  .explore-panel-layout { grid-template-columns: 1fr; }
 }
 
-.explore-section {
+.explore-panel-list {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r);
-  padding: 20px 20px 8px;
+  overflow: hidden;
 }
 
-.explore-section .section-head { margin-bottom: 4px; }
-
-.explore-list { display: flex; flex-direction: column; }
+.explore-panel-chart {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 20px;
+}
 
 .explore-market-row,
 .explore-user-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 8px;
-  margin: 0 -8px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
 }
 .explore-market-row:last-child,
@@ -1181,7 +1207,6 @@ select option { background: var(--surface2); }
 
 .explore-market-row {
   cursor: pointer;
-  border-radius: var(--r-sm);
   transition: background .12s;
 }
 .explore-market-row:hover { background: var(--surface2); }
@@ -1190,7 +1215,7 @@ select option { background: var(--surface2); }
   font-size: 12px;
   font-weight: 800;
   color: var(--text3);
-  min-width: 26px;
+  min-width: 24px;
   flex-shrink: 0;
 }
 
@@ -1199,7 +1224,7 @@ select option { background: var(--surface2); }
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .explore-row-title {
@@ -1221,17 +1246,11 @@ select option { background: var(--surface2); }
   flex-shrink: 0;
 }
 
-.explore-pct {
-  font-size: 14px;
-  font-weight: 800;
-}
+.explore-pct { font-size: 14px; font-weight: 800; }
 .explore-pct.yes { color: var(--yes); }
 .explore-pct.no  { color: var(--no);  }
 
-.explore-stat {
-  font-size: 11px;
-  color: var(--text3);
-}
+.explore-stat { font-size: 11px; color: var(--text3); }
 
 .explore-username {
   flex: 1;
@@ -1258,6 +1277,56 @@ select option { background: var(--surface2); }
   color: var(--primary);
   padding: 1px 6px;
   border-radius: 20px;
+}
+
+/* ── Chart ─────────────────────────────────────────────────────────────── */
+.chart-wrap { display: flex; flex-direction: column; gap: 14px; }
+.chart-svg  { width: 100%; height: auto; display: block; }
+
+.chart-grid { stroke: var(--border);  stroke-width: 1; }
+.chart-axis { stroke: var(--border2); stroke-width: 1; }
+
+.chart-lbl {
+  fill: var(--text3);
+  font-size: 10px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.chart-leg-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text2);
+  min-width: 0;
+}
+
+.chart-leg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chart-leg-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+
+.chart-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text3);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */
