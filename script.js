@@ -137,6 +137,30 @@ function ensureChatDataShape() {
   }
 }
 
+function chatHasMessages(chat) {
+  return Array.isArray(chat?.messages) && chat.messages.length > 0;
+}
+
+function pruneEmptyChats() {
+  if (!appData.chats) return false;
+  let changed = false;
+  for (const [id, chat] of Object.entries(appData.chats)) {
+    if (!chatHasMessages(chat)) {
+      const participants = Array.isArray(chat?.participants) ? chat.participants : [];
+      for (const username of participants) {
+        const user = appData.users?.[username];
+        if (!user?.chattedWith) continue;
+        for (const other of participants) {
+          if (other !== username) delete user.chattedWith[other];
+        }
+      }
+      delete appData.chats[id];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function applyMigrations(fromVersion) {
   if (fromVersion < 1) {
     for (const ud of Object.values(appData.users)) {
@@ -178,8 +202,11 @@ function startRealtimeListener() {
         if (!appData.chats)        appData.chats        = {};
         if (!appData.meta)         appData.meta         = { dataVersion: 0 };
         ensureChatDataShape();
+        const prunedEmptyChats = pruneEmptyChats();
         if (!appData.notifyEmails) {
           appData.notifyEmails = ['efield@uchicago.edu'];
+          saveData();
+        } else if (prunedEmptyChats) {
           saveData();
         }
 
@@ -202,6 +229,8 @@ function startRealtimeListener() {
     // Remote update from another client
     if (!data) return;
     appData = data;
+    ensureChatDataShape();
+    if (pruneEmptyChats()) saveData();
     syncCurrentUser();
     if (currentUser) {
       switch (activeView) {
@@ -333,11 +362,43 @@ function chatIdFor(a, b) {
   return [a, b].sort().join('__');
 }
 
+function canStartChatWith(username) {
+  if (!currentUser || username === currentUser.username) return false;
+  const target = appData.users[username];
+  if (!target) return false;
+  return currentUser.role === 'admin' || target.role !== 'admin';
+}
+
+function normalizeChatRecord(chat, username) {
+  if (!chat) return null;
+  if (!Array.isArray(chat.participants)) {
+    chat.participants = [currentUser.username, username].sort();
+  }
+  if (!Array.isArray(chat.messages)) {
+    chat.messages = [];
+  }
+  if (!chat.createdAt) {
+    chat.createdAt = new Date().toISOString();
+  }
+  if (!chat.updatedAt) {
+    chat.updatedAt = chat.createdAt;
+  }
+  return chat;
+}
+
+function getChatWith(username) {
+  if (!currentUser || !appData.chats) return null;
+  const id = chatIdFor(currentUser.username, username);
+  const chat = normalizeChatRecord(appData.chats[id], username);
+  return chatHasMessages(chat) ? chat : null;
+}
+
 function ensureChat(username) {
   const ud = userData();
   if (!ud) return { success: false, error: 'Not logged in.' };
   if (!appData.users[username]) return { success: false, error: 'User not found.' };
   if (username === currentUser.username) return { success: false, error: 'Choose another user.' };
+  if (!canStartChatWith(username)) return { success: false, error: 'Admins cannot receive new messages.' };
 
   if (!appData.chats) appData.chats = {};
   if (!ud.chattedWith) ud.chattedWith = {};
@@ -353,18 +414,7 @@ function ensureChat(username) {
       updatedAt: new Date().toISOString()
     };
   }
-  if (!Array.isArray(appData.chats[id].participants)) {
-    appData.chats[id].participants = [currentUser.username, username].sort();
-  }
-  if (!Array.isArray(appData.chats[id].messages)) {
-    appData.chats[id].messages = [];
-  }
-  if (!appData.chats[id].createdAt) {
-    appData.chats[id].createdAt = new Date().toISOString();
-  }
-  if (!appData.chats[id].updatedAt) {
-    appData.chats[id].updatedAt = appData.chats[id].createdAt;
-  }
+  normalizeChatRecord(appData.chats[id], username);
 
   ud.chattedWith[username] = true;
   appData.users[username].chattedWith[currentUser.username] = true;
@@ -395,7 +445,7 @@ function sendChatMessage(toUsername, rawText) {
 function chatsForCurrentUser() {
   if (!currentUser) return [];
   const chats = Object.values(appData.chats || {}).filter(chat =>
-    (chat.participants || []).includes(currentUser.username)
+    chatHasMessages(chat) && (chat.participants || []).includes(currentUser.username)
   );
   return chats.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
 }
@@ -925,14 +975,12 @@ function positionCard({ market: m, h }) {
 
 // ── Render: Chat ───────────────────────────────────────────────────────────
 function renderChat() {
-  const users = Object.keys(appData.users || {}).filter(name => name !== currentUser.username).sort();
+  const users = Object.keys(appData.users || {}).filter(canStartChatWith).sort();
   const chats = chatsForCurrentUser();
   if (!selectedChatUser && chats.length) {
     selectedChatUser = (chats[0].participants || []).find(name => name !== currentUser.username) || null;
   }
   if (selectedChatUser && !appData.users[selectedChatUser]) selectedChatUser = null;
-
-  const filteredUsers = users.filter(name => name.toLowerCase().includes(chatUserSearch.toLowerCase()));
 
   document.getElementById('view-chat').innerHTML = `
     <div class="page-inner chat-page-inner">
@@ -943,19 +991,17 @@ function renderChat() {
 
       <div class="chat-layout">
         <aside class="chat-sidebar">
-          <div class="chat-new">
-            <label for="chat-user-search">Start a chat</label>
-            <input id="chat-user-search" type="text" placeholder="Search users…" value="${esc(chatUserSearch)}">
-            <div class="chat-user-results">
-              ${filteredUsers.length ? filteredUsers.map(chatUserRow).join('') : '<p class="hint-txt chat-empty-mini">No users found.</p>'}
-            </div>
-          </div>
-
           <div class="chat-list-wrap">
             <h3 class="section-head">Existing Chats</h3>
             <div class="chat-list">
               ${chats.length ? chats.map(chatListRow).join('') : '<p class="hint-txt chat-empty-mini">No chats yet.</p>'}
             </div>
+          </div>
+
+          <div class="chat-new">
+            <label for="chat-user-search">Start a chat</label>
+            <input id="chat-user-search" type="text" placeholder="Search users…" value="${esc(chatUserSearch)}">
+            <div class="chat-user-results"></div>
           </div>
         </aside>
 
@@ -972,17 +1018,11 @@ function renderChat() {
 
   document.getElementById('chat-user-search')?.addEventListener('input', e => {
     chatUserSearch = e.target.value;
-    renderChat();
+    renderChatUserResults(users);
   });
 
-  document.querySelectorAll('.chat-user-row, .chat-list-row').forEach(row => {
-    row.addEventListener('click', () => {
-      selectedChatUser = row.dataset.username;
-      ensureChat(selectedChatUser);
-      saveData();
-      renderChat();
-    });
-  });
+  renderChatUserResults(users);
+  bindChatPickers('.chat-list-row');
 
   document.getElementById('chat-form')?.addEventListener('submit', e => {
     e.preventDefault();
@@ -1001,6 +1041,25 @@ function renderChat() {
 
   const messageList = document.getElementById('chat-messages');
   if (messageList) messageList.scrollTop = messageList.scrollHeight;
+}
+
+function renderChatUserResults(users) {
+  const container = document.querySelector('.chat-user-results');
+  if (!container) return;
+  const filteredUsers = users.filter(name => name.toLowerCase().includes(chatUserSearch.toLowerCase()));
+  container.innerHTML = filteredUsers.length
+    ? filteredUsers.map(chatUserRow).join('')
+    : '<p class="hint-txt chat-empty-mini">No users found.</p>';
+  bindChatPickers('.chat-user-row');
+}
+
+function bindChatPickers(selector) {
+  document.querySelectorAll(selector).forEach(row => {
+    row.addEventListener('click', () => {
+      selectedChatUser = row.dataset.username;
+      renderChat();
+    });
+  });
 }
 
 function chatUserRow(name) {
@@ -1033,9 +1092,10 @@ function chatListRow(chat) {
 }
 
 function chatConversationHTML(username) {
-  const res = ensureChat(username);
-  const chat = res.success ? res.chat : null;
+  const existingChat = getChatWith(username);
+  const chat = existingChat;
   const messages = chat?.messages || [];
+  const canSend = canStartChatWith(username);
   return `
     <div class="chat-panel-head">
       <span class="chat-avatar large">${esc(username[0].toUpperCase())}</span>
@@ -1053,13 +1113,19 @@ function chatConversationHTML(username) {
       `}
     </div>
 
-    <form id="chat-form" class="chat-compose">
-      <div id="chat-err" class="err-msg" style="display:none"></div>
-      <div class="chat-compose-row">
-        <textarea id="chat-message-input" rows="2" maxlength="1000" placeholder="Write a message…"></textarea>
-        <button class="btn btn-primary" type="submit">Send</button>
+    ${canSend ? `
+      <form id="chat-form" class="chat-compose">
+        <div id="chat-err" class="err-msg" style="display:none"></div>
+        <div class="chat-compose-row">
+          <textarea id="chat-message-input" rows="2" maxlength="1000" placeholder="Write a message…"></textarea>
+          <button class="btn btn-primary" type="submit">Send</button>
+        </div>
+      </form>
+    ` : `
+      <div class="chat-compose chat-compose-locked">
+        <p class="hint-txt chat-empty-mini">Admins can message you here, but replies are disabled.</p>
       </div>
-    </form>
+    `}
   `;
 }
 
