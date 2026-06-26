@@ -7,7 +7,7 @@ const db = firebase.database();
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SESSION_KEY = 'polyquarket_session_v3';
-const CURRENT_DATA_VERSION = 2;
+const CURRENT_DATA_VERSION = 2; 
 
 
 const DEFAULT_DATA = {
