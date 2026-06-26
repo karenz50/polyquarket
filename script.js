@@ -141,6 +141,18 @@ function chatHasMessages(chat) {
   return Array.isArray(chat?.messages) && chat.messages.length > 0;
 }
 
+function unreadMessagesInChat(chat) {
+  if (!currentUser || !chatHasMessages(chat)) return 0;
+  const readAt = new Date(chat.readAt?.[currentUser.username] || 0).getTime();
+  return chat.messages.filter(msg =>
+    msg.from !== currentUser.username && new Date(msg.ts).getTime() > readAt
+  ).length;
+}
+
+function totalUnreadChatMessages() {
+  return chatsForCurrentUser().reduce((sum, chat) => sum + unreadMessagesInChat(chat), 0);
+}
+
 function pruneEmptyChats() {
   if (!appData.chats) return false;
   let changed = false;
@@ -383,6 +395,9 @@ function normalizeChatRecord(chat, username) {
   if (!chat.updatedAt) {
     chat.updatedAt = chat.createdAt;
   }
+  if (!chat.readAt) {
+    chat.readAt = {};
+  }
   return chat;
 }
 
@@ -411,7 +426,8 @@ function ensureChat(username) {
       participants: [currentUser.username, username].sort(),
       messages: [],
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      readAt: {}
     };
   }
   normalizeChatRecord(appData.chats[id], username);
@@ -437,9 +453,31 @@ function sendChatMessage(toUsername, rawText) {
     ts: now
   });
   res.chat.updatedAt = now;
+  if (!res.chat.readAt) res.chat.readAt = {};
+  res.chat.readAt[currentUser.username] = now;
   syncCurrentUser();
   saveData();
   return { success: true };
+}
+
+function markChatRead(username) {
+  const chat = getChatWith(username);
+  if (!chat) return false;
+  const incoming = chat.messages
+    .filter(msg => msg.from !== currentUser.username)
+    .sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  if (!incoming.length) return false;
+
+  const latestIncomingTs = incoming[0].ts;
+  const currentReadTs = chat.readAt?.[currentUser.username];
+  if (currentReadTs && new Date(currentReadTs).getTime() >= new Date(latestIncomingTs).getTime()) {
+    return false;
+  }
+
+  if (!chat.readAt) chat.readAt = {};
+  chat.readAt[currentUser.username] = latestIncomingTs;
+  saveData();
+  return true;
 }
 
 function chatsForCurrentUser() {
@@ -600,6 +638,7 @@ function showView(view) {
     if (avatarEl) avatarEl.textContent = currentUser.username[0].toUpperCase();
     const adminLink = document.getElementById('nav-admin');
     if (adminLink) adminLink.style.display = currentUser.role === 'admin' ? '' : 'none';
+    refreshChatBadges();
   }
 
   switch (view) {
@@ -616,6 +655,15 @@ function refreshHeader() {
   if (!currentUser) return;
   const ud = userData();
   if (ud) document.getElementById('header-balance').textContent = fmt$(ud.balance);
+  refreshChatBadges();
+}
+
+function refreshChatBadges() {
+  const badge = document.getElementById('chat-nav-badge');
+  if (!badge || !currentUser) return;
+  const unread = totalUnreadChatMessages();
+  badge.textContent = unread > 99 ? '99+' : unread;
+  badge.style.display = unread > 0 ? '' : 'none';
 }
 
 // ── Render: Login ──────────────────────────────────────────────────────────
@@ -981,6 +1029,8 @@ function renderChat() {
     selectedChatUser = (chats[0].participants || []).find(name => name !== currentUser.username) || null;
   }
   if (selectedChatUser && !appData.users[selectedChatUser]) selectedChatUser = null;
+  if (selectedChatUser) markChatRead(selectedChatUser);
+  refreshChatBadges();
 
   document.getElementById('view-chat').innerHTML = `
     <div class="page-inner chat-page-inner">
@@ -1079,13 +1129,15 @@ function chatListRow(chat) {
   const last = messages[messages.length - 1];
   const preview = last ? last.text : 'No messages yet.';
   const isActive = selectedChatUser === other;
+  const unread = unreadMessagesInChat(chat);
   return `
-    <button class="chat-list-row ${isActive ? 'active' : ''}" data-username="${esc(other)}" type="button">
+    <button class="chat-list-row ${isActive ? 'active' : ''} ${unread ? 'unread' : ''}" data-username="${esc(other)}" type="button">
       <span class="chat-avatar">${esc(other[0].toUpperCase())}</span>
       <span class="chat-list-info">
         <span class="chat-list-name">${esc(other)}</span>
         <span class="chat-list-preview">${esc(preview)}</span>
       </span>
+      ${unread ? `<span class="chat-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
       ${last ? `<span class="chat-list-time">${formatChatTime(last.ts)}</span>` : ''}
     </button>
   `;
