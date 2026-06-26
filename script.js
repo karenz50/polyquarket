@@ -7,15 +7,16 @@ const db = firebase.database();
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SESSION_KEY = 'polyquarket_session_v3';
-const CURRENT_DATA_VERSION = 2; 
+const CURRENT_DATA_VERSION = 3;
 
 
 const DEFAULT_DATA = {
   meta: { dataVersion: CURRENT_DATA_VERSION },
   users: {
-    karen:     { password: '1234', role: 'user',  balance: 670 },
-    elizabeth: { password: 'goat', role: 'admin', balance: 670 }
+    karen:     { password: '1234', role: 'user',  balance: 670, chattedWith: {} },
+    elizabeth: { password: 'goat', role: 'admin', balance: 670, chattedWith: {} }
   },
+  chats: {},
   markets: [
     {
       id: 'demo0',
@@ -114,6 +115,8 @@ let marketSearch = '';
 let marketCategoryFilter = 'all';
 let activeExploreTab = 'trending';
 let exploreChartFilter = 'all';
+let selectedChatUser = null;
+let chatUserSearch = '';
 
 // ── Storage ────────────────────────────────────────────────────────────────
 let _dbInitialized = false;
@@ -124,6 +127,14 @@ function saveData() {
 
 function deepCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+function ensureChatDataShape() {
+  if (!appData.chats) appData.chats = {};
+  if (!appData.users) appData.users = {};
+  for (const ud of Object.values(appData.users)) {
+    if (!ud.chattedWith) ud.chattedWith = {};
+  }
 }
 
 function applyMigrations(fromVersion) {
@@ -146,6 +157,9 @@ function applyMigrations(fromVersion) {
       }
     }
   }
+  if (fromVersion < 3) {
+    ensureChatDataShape();
+  }
   if (!appData.meta) appData.meta = {};
   appData.meta.dataVersion = CURRENT_DATA_VERSION;
   saveData();
@@ -161,7 +175,9 @@ function startRealtimeListener() {
         appData = data;
         if (!appData.users)        appData.users        = deepCopy(DEFAULT_DATA.users);
         if (!appData.markets)      appData.markets      = deepCopy(DEFAULT_DATA.markets);
+        if (!appData.chats)        appData.chats        = {};
         if (!appData.meta)         appData.meta         = { dataVersion: 0 };
+        ensureChatDataShape();
         if (!appData.notifyEmails) {
           appData.notifyEmails = ['efield@uchicago.edu'];
           saveData();
@@ -192,6 +208,7 @@ function startRealtimeListener() {
         case 'markets':   renderMarkets();   break;
         case 'explore':   renderExplore();   break;
         case 'portfolio': renderPortfolio(); break;
+        case 'chat':      renderChat();      break;
         case 'admin':     renderAdmin();     break;
       }
       refreshHeader();
@@ -270,7 +287,7 @@ function register(email, username, password, confirmPassword) {
     }
   }
 
-  appData.users[username] = { email, password, role: 'user', balance: 670, history: [{ ts: new Date().toISOString(), bal: 670 }] };
+  appData.users[username] = { email, password, role: 'user', balance: 670, chattedWith: {}, history: [{ ts: new Date().toISOString(), bal: 670 }] };
   saveData();
   return { success: true };
 }
@@ -310,6 +327,77 @@ function userData() {
 
 function syncCurrentUser() {
   if (currentUser) currentUser = { username: currentUser.username, ...appData.users[currentUser.username] };
+}
+
+function chatIdFor(a, b) {
+  return [a, b].sort().join('__');
+}
+
+function ensureChat(username) {
+  const ud = userData();
+  if (!ud) return { success: false, error: 'Not logged in.' };
+  if (!appData.users[username]) return { success: false, error: 'User not found.' };
+  if (username === currentUser.username) return { success: false, error: 'Choose another user.' };
+
+  if (!appData.chats) appData.chats = {};
+  if (!ud.chattedWith) ud.chattedWith = {};
+  if (!appData.users[username].chattedWith) appData.users[username].chattedWith = {};
+
+  const id = chatIdFor(currentUser.username, username);
+  if (!appData.chats[id]) {
+    appData.chats[id] = {
+      id,
+      participants: [currentUser.username, username].sort(),
+      messages: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+  }
+  if (!Array.isArray(appData.chats[id].participants)) {
+    appData.chats[id].participants = [currentUser.username, username].sort();
+  }
+  if (!Array.isArray(appData.chats[id].messages)) {
+    appData.chats[id].messages = [];
+  }
+  if (!appData.chats[id].createdAt) {
+    appData.chats[id].createdAt = new Date().toISOString();
+  }
+  if (!appData.chats[id].updatedAt) {
+    appData.chats[id].updatedAt = appData.chats[id].createdAt;
+  }
+
+  ud.chattedWith[username] = true;
+  appData.users[username].chattedWith[currentUser.username] = true;
+  return { success: true, chat: appData.chats[id] };
+}
+
+function sendChatMessage(toUsername, rawText) {
+  const text = rawText.trim();
+  if (!text) return { success: false, error: 'Enter a message.' };
+  if (text.length > 1000) return { success: false, error: 'Messages must be 1000 characters or fewer.' };
+
+  const res = ensureChat(toUsername);
+  if (!res.success) return res;
+
+  const now = new Date().toISOString();
+  res.chat.messages.push({
+    id: 'msg' + Date.now(),
+    from: currentUser.username,
+    text,
+    ts: now
+  });
+  res.chat.updatedAt = now;
+  syncCurrentUser();
+  saveData();
+  return { success: true };
+}
+
+function chatsForCurrentUser() {
+  if (!currentUser) return [];
+  const chats = Object.values(appData.chats || {}).filter(chat =>
+    (chat.participants || []).includes(currentUser.username)
+  );
+  return chats.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
 }
 
 // ── Market Actions ─────────────────────────────────────────────────────────
@@ -432,7 +520,7 @@ function deleteMarket(marketId) {
 
 // ── View Management ────────────────────────────────────────────────────────
 function showView(view) {
-  if ((view === 'admin' || view === 'portfolio' || view === 'markets' || view === 'explore') && !currentUser) {
+  if ((view === 'admin' || view === 'portfolio' || view === 'markets' || view === 'explore' || view === 'chat') && !currentUser) {
     view = 'login';
   }
   if (view === 'admin' && currentUser?.role !== 'admin') {
@@ -469,6 +557,7 @@ function showView(view) {
     case 'markets':   renderMarkets();   break;
     case 'explore':   renderExplore();   break;
     case 'portfolio': renderPortfolio(); break;
+    case 'chat':      renderChat();      break;
     case 'admin':     renderAdmin();     break;
   }
 }
@@ -832,6 +921,165 @@ function positionCard({ market: m, h }) {
       </div>
     </div>
   `;
+}
+
+// ── Render: Chat ───────────────────────────────────────────────────────────
+function renderChat() {
+  const users = Object.keys(appData.users || {}).filter(name => name !== currentUser.username).sort();
+  const chats = chatsForCurrentUser();
+  if (!selectedChatUser && chats.length) {
+    selectedChatUser = (chats[0].participants || []).find(name => name !== currentUser.username) || null;
+  }
+  if (selectedChatUser && !appData.users[selectedChatUser]) selectedChatUser = null;
+
+  const filteredUsers = users.filter(name => name.toLowerCase().includes(chatUserSearch.toLowerCase()));
+
+  document.getElementById('view-chat').innerHTML = `
+    <div class="page-inner chat-page-inner">
+      <div class="page-hero">
+        <h2 class="hero-title">Chat</h2>
+        <p class="hero-sub">Message other Polyquarket users</p>
+      </div>
+
+      <div class="chat-layout">
+        <aside class="chat-sidebar">
+          <div class="chat-new">
+            <label for="chat-user-search">Start a chat</label>
+            <input id="chat-user-search" type="text" placeholder="Search users…" value="${esc(chatUserSearch)}">
+            <div class="chat-user-results">
+              ${filteredUsers.length ? filteredUsers.map(chatUserRow).join('') : '<p class="hint-txt chat-empty-mini">No users found.</p>'}
+            </div>
+          </div>
+
+          <div class="chat-list-wrap">
+            <h3 class="section-head">Existing Chats</h3>
+            <div class="chat-list">
+              ${chats.length ? chats.map(chatListRow).join('') : '<p class="hint-txt chat-empty-mini">No chats yet.</p>'}
+            </div>
+          </div>
+        </aside>
+
+        <section class="chat-panel">
+          ${selectedChatUser ? chatConversationHTML(selectedChatUser) : `
+            <div class="chat-no-selection">
+              <p>Select a user to start messaging.</p>
+            </div>
+          `}
+        </section>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('chat-user-search')?.addEventListener('input', e => {
+    chatUserSearch = e.target.value;
+    renderChat();
+  });
+
+  document.querySelectorAll('.chat-user-row, .chat-list-row').forEach(row => {
+    row.addEventListener('click', () => {
+      selectedChatUser = row.dataset.username;
+      ensureChat(selectedChatUser);
+      saveData();
+      renderChat();
+    });
+  });
+
+  document.getElementById('chat-form')?.addEventListener('submit', e => {
+    e.preventDefault();
+    const input = document.getElementById('chat-message-input');
+    const errEl = document.getElementById('chat-err');
+    errEl.style.display = 'none';
+    const res = sendChatMessage(selectedChatUser, input.value);
+    if (res.success) {
+      input.value = '';
+      renderChat();
+    } else {
+      errEl.textContent = res.error;
+      errEl.style.display = 'block';
+    }
+  });
+
+  const messageList = document.getElementById('chat-messages');
+  if (messageList) messageList.scrollTop = messageList.scrollHeight;
+}
+
+function chatUserRow(name) {
+  const isActive = selectedChatUser === name;
+  return `
+    <button class="chat-user-row ${isActive ? 'active' : ''}" data-username="${esc(name)}" type="button">
+      <span class="chat-avatar">${esc(name[0].toUpperCase())}</span>
+      <span>${esc(name)}</span>
+    </button>
+  `;
+}
+
+function chatListRow(chat) {
+  const other = (chat.participants || []).find(name => name !== currentUser.username);
+  if (!other) return '';
+  const messages = chat.messages || [];
+  const last = messages[messages.length - 1];
+  const preview = last ? last.text : 'No messages yet.';
+  const isActive = selectedChatUser === other;
+  return `
+    <button class="chat-list-row ${isActive ? 'active' : ''}" data-username="${esc(other)}" type="button">
+      <span class="chat-avatar">${esc(other[0].toUpperCase())}</span>
+      <span class="chat-list-info">
+        <span class="chat-list-name">${esc(other)}</span>
+        <span class="chat-list-preview">${esc(preview)}</span>
+      </span>
+      ${last ? `<span class="chat-list-time">${formatChatTime(last.ts)}</span>` : ''}
+    </button>
+  `;
+}
+
+function chatConversationHTML(username) {
+  const res = ensureChat(username);
+  const chat = res.success ? res.chat : null;
+  const messages = chat?.messages || [];
+  return `
+    <div class="chat-panel-head">
+      <span class="chat-avatar large">${esc(username[0].toUpperCase())}</span>
+      <div>
+        <h3>${esc(username)}</h3>
+        <p>${messages.length} message${messages.length === 1 ? '' : 's'}</p>
+      </div>
+    </div>
+
+    <div id="chat-messages" class="chat-messages">
+      ${messages.length ? messages.map(chatMessageBubble).join('') : `
+        <div class="chat-no-messages">
+          <p>No messages yet.</p>
+        </div>
+      `}
+    </div>
+
+    <form id="chat-form" class="chat-compose">
+      <div id="chat-err" class="err-msg" style="display:none"></div>
+      <div class="chat-compose-row">
+        <textarea id="chat-message-input" rows="2" maxlength="1000" placeholder="Write a message…"></textarea>
+        <button class="btn btn-primary" type="submit">Send</button>
+      </div>
+    </form>
+  `;
+}
+
+function chatMessageBubble(message) {
+  const mine = message.from === currentUser.username;
+  return `
+    <div class="chat-message ${mine ? 'mine' : 'theirs'}">
+      <div class="chat-bubble">
+        <p>${esc(message.text)}</p>
+        <span>${esc(formatChatTime(message.ts))}</span>
+      </div>
+    </div>
+  `;
+}
+
+function formatChatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 // ── Render: Admin ──────────────────────────────────────────────────────────
