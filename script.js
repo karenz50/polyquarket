@@ -115,6 +115,21 @@ let marketSearch = '';
 let marketCategoryFilter = 'all';
 let activeExploreTab = 'trending';
 let exploreChartFilter = 'all';
+let activeGamesTab = 'plinko';
+let hiLoRound = null;
+let dinoState = {
+  running: false,
+  over: false,
+  score: 0,
+  best: 0,
+  wager: 5,
+  playerY: 0,
+  velocity: 0,
+  obstacles: [],
+  lastTs: 0,
+  spawnTimer: 0,
+  frame: null
+};
 let selectedChatUser = null;
 let chatUserSearch = '';
 let networkAnimationFrame = null;
@@ -249,6 +264,7 @@ function startRealtimeListener() {
       switch (activeView) {
         case 'markets':   renderMarkets();   break;
         case 'explore':   renderExplore();   break;
+        case 'games':     break;
         case 'portfolio': renderPortfolio(); break;
         case 'chat':      renderChat();      break;
         case 'admin':     renderAdmin();     break;
@@ -609,9 +625,10 @@ function deleteMarket(marketId) {
 
 // ── View Management ────────────────────────────────────────────────────────
 function showView(view) {
-  if ((view === 'admin' || view === 'portfolio' || view === 'markets' || view === 'explore' || view === 'chat') && !currentUser) {
+  if ((view === 'admin' || view === 'portfolio' || view === 'markets' || view === 'explore' || view === 'games' || view === 'chat') && !currentUser) {
     view = 'login';
   }
+  if (activeView === 'games' && view !== 'games') stopDinoGame();
   if (view === 'admin' && currentUser?.role !== 'admin') {
     view = 'markets';
   }
@@ -646,6 +663,7 @@ function showView(view) {
     case 'login':     renderLogin();     break;
     case 'markets':   renderMarkets();   break;
     case 'explore':   renderExplore();   break;
+    case 'games':     renderGames();     break;
     case 'portfolio': renderPortfolio(); break;
     case 'chat':      renderChat();      break;
     case 'admin':     renderAdmin();     break;
@@ -1743,6 +1761,500 @@ function exploreUserRow(name, u, rank) {
   `;
 }
 
+// ── Render: Games ──────────────────────────────────────────────────────────
+function renderGames() {
+  document.getElementById('view-games').innerHTML = `
+    <div class="page-inner games-page-inner">
+      <div class="page-hero">
+        <h2 class="hero-title">Games</h2>
+        <p class="hero-sub">Fast mini games with instant balance updates</p>
+      </div>
+      <div class="explore-tabs">
+        <button class="explore-tab ${activeGamesTab === 'plinko' ? 'active' : ''}" data-gtab="plinko">Plinko</button>
+        <button class="explore-tab ${activeGamesTab === 'cards' ? 'active' : ''}" data-gtab="cards">High Low Cards</button>
+        <button class="explore-tab ${activeGamesTab === 'runner' ? 'active' : ''}" data-gtab="runner">Runner</button>
+      </div>
+      <div id="games-content"></div>
+    </div>
+  `;
+
+  document.querySelectorAll('[data-gtab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      stopDinoGame();
+      activeGamesTab = tab.dataset.gtab;
+      document.querySelectorAll('[data-gtab]').forEach(t =>
+        t.classList.toggle('active', t.dataset.gtab === activeGamesTab)
+      );
+      renderGamesTab();
+    });
+  });
+
+  renderGamesTab();
+}
+
+function renderGamesTab() {
+  const content = document.getElementById('games-content');
+  if (!content) return;
+  if (activeGamesTab === 'cards') renderCardGame(content);
+  else if (activeGamesTab === 'runner') renderRunnerGame(content);
+  else renderPlinkoGame(content);
+}
+
+function placeGameWager(rawAmount, gameName) {
+  const amount = parseFloat(rawAmount);
+  const ud = userData();
+  if (!ud) return { success: false, error: 'Not logged in.' };
+  if (!amount || amount <= 0) return { success: false, error: 'Enter a valid wager.' };
+  if (amount > ud.balance + 0.001) return { success: false, error: 'Insufficient balance.' };
+  ud.balance = +((ud.balance - amount).toFixed(2));
+  if (!ud.history) ud.history = [];
+  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance, note: gameName });
+  syncCurrentUser();
+  saveData();
+  refreshHeader();
+  return { success: true, amount };
+}
+
+function awardGamePayout(amount, gameName) {
+  const ud = userData();
+  if (!ud || amount <= 0) return;
+  ud.balance = +((ud.balance + amount).toFixed(2));
+  if (!ud.history) ud.history = [];
+  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance, note: gameName });
+  syncCurrentUser();
+  saveData();
+  refreshHeader();
+}
+
+function renderPlinkoGame(content) {
+  content.innerHTML = `
+    <div class="game-layout">
+      <div class="game-panel">
+        <div class="game-panel-head">
+          <div>
+            <h3>Plinko</h3>
+            <p>Pick a risk level, drop the chip, and land in a multiplier bucket.</p>
+          </div>
+          <span class="game-chip">Balance ${fmt$(userData().balance)}</span>
+        </div>
+        <div class="game-controls">
+          <div class="field">
+            <label>Wager</label>
+            <div class="amount-row">
+              <span class="amount-prefix">$</span>
+              <input id="plinko-wager" type="number" min="0.01" step="0.01" value="5">
+            </div>
+          </div>
+          <div class="field">
+            <label>Risk</label>
+            <select id="plinko-risk">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-large" id="plinko-drop-btn">Drop</button>
+        </div>
+        <div id="plinko-board" class="plinko-board">
+          ${plinkoPegHTML()}
+          <div id="plinko-chip" class="plinko-chip" style="display:none"></div>
+          <div id="plinko-buckets" class="plinko-buckets">${plinkoBucketHTML('medium')}</div>
+        </div>
+        <div id="plinko-result" class="game-result">Ready to drop.</div>
+      </div>
+      <div class="game-side">
+        <div class="game-side-stat"><span>Low risk</span><strong>0.5x - 2.0x</strong></div>
+        <div class="game-side-stat"><span>Medium risk</span><strong>0.2x - 5.0x</strong></div>
+        <div class="game-side-stat"><span>High risk</span><strong>0x - 12.0x</strong></div>
+      </div>
+    </div>
+  `;
+
+  const riskEl = document.getElementById('plinko-risk');
+  riskEl.addEventListener('change', () => {
+    document.getElementById('plinko-buckets').innerHTML = plinkoBucketHTML(riskEl.value);
+  });
+  document.getElementById('plinko-drop-btn').addEventListener('click', playPlinko);
+}
+
+function plinkoMultipliers(risk) {
+  return {
+    low: [0.5, 0.8, 1, 1.2, 2],
+    medium: [0.2, 0.6, 1, 1.8, 5],
+    high: [0, 0.3, 1, 3, 12]
+  }[risk] || [0.2, 0.6, 1, 1.8, 5];
+}
+
+function plinkoPegHTML() {
+  let html = '';
+  for (let row = 0; row < 6; row++) {
+    for (let col = 0; col <= row; col++) {
+      const x = 50 + (col - row / 2) * 13;
+      const y = 18 + row * 10;
+      html += `<span class="plinko-peg" style="left:${x}%;top:${y}%"></span>`;
+    }
+  }
+  return html;
+}
+
+function plinkoBucketHTML(risk) {
+  return plinkoMultipliers(risk).map(m => `<span>${m}x</span>`).join('');
+}
+
+function playPlinko() {
+  const btn = document.getElementById('plinko-drop-btn');
+  const risk = document.getElementById('plinko-risk').value;
+  const wager = document.getElementById('plinko-wager').value;
+  const res = placeGameWager(wager, 'Plinko');
+  const resultEl = document.getElementById('plinko-result');
+  if (!res.success) {
+    resultEl.textContent = res.error;
+    resultEl.className = 'game-result loss';
+    return;
+  }
+
+  const multipliers = plinkoMultipliers(risk);
+  const weights = risk === 'high' ? [22, 28, 25, 18, 7] : risk === 'low' ? [12, 24, 30, 24, 10] : [16, 26, 28, 22, 8];
+  const bucket = weightedIndex(weights);
+  const mult = multipliers[bucket];
+  const payout = +(res.amount * mult).toFixed(2);
+
+  btn.disabled = true;
+  resultEl.textContent = 'Dropping...';
+  resultEl.className = 'game-result';
+  const chip = document.getElementById('plinko-chip');
+  chip.style.display = 'block';
+  chip.style.left = '50%';
+  chip.style.top = '4%';
+  requestAnimationFrame(() => {
+    chip.style.left = `${10 + bucket * 20}%`;
+    chip.style.top = '82%';
+  });
+
+  setTimeout(() => {
+    awardGamePayout(payout, 'Plinko');
+    resultEl.textContent = `${mult}x multiplier. ${payout > 0 ? `Paid ${fmt$(payout)}.` : 'No payout this drop.'}`;
+    resultEl.className = `game-result ${payout > res.amount ? 'win' : 'loss'}`;
+    btn.disabled = false;
+  }, 850);
+}
+
+function weightedIndex(weights) {
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (let i = 0; i < weights.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return i;
+  }
+  return weights.length - 1;
+}
+
+function renderCardGame(content) {
+  content.innerHTML = `
+    <div class="game-layout">
+      <div class="game-panel">
+        <div class="game-panel-head">
+          <div>
+            <h3>High Low Cards</h3>
+            <p>Four calls: color, higher/lower, outside/inside, then suit.</p>
+          </div>
+          <span class="game-chip">4 correct pays 8x</span>
+        </div>
+        <div class="game-controls">
+          <div class="field">
+            <label>Wager</label>
+            <div class="amount-row">
+              <span class="amount-prefix">$</span>
+              <input id="cards-wager" type="number" min="0.01" step="0.01" value="5">
+            </div>
+          </div>
+          <button class="btn btn-primary btn-large" id="cards-start-btn">Deal</button>
+        </div>
+        <div id="cards-table" class="cards-table">${cardBackHTML().repeat(4)}</div>
+        <div id="cards-prompt" class="game-result">Deal a round to start.</div>
+        <div id="cards-actions" class="cards-actions"></div>
+      </div>
+      <div class="game-side">
+        <div class="game-side-stat"><span>Step 1</span><strong>Red or black</strong></div>
+        <div class="game-side-stat"><span>Step 2</span><strong>Higher or lower</strong></div>
+        <div class="game-side-stat"><span>Step 3</span><strong>Higher, lower, or between</strong></div>
+        <div class="game-side-stat"><span>Step 4</span><strong>Exact suit</strong></div>
+      </div>
+    </div>
+  `;
+  document.getElementById('cards-start-btn').addEventListener('click', startHiLoCards);
+  if (hiLoRound) drawHiLoRound();
+}
+
+function cardBackHTML() {
+  return '<div class="playing-card card-back">?</div>';
+}
+
+function startHiLoCards() {
+  const res = placeGameWager(document.getElementById('cards-wager').value, 'High Low Cards');
+  if (!res.success) {
+    const prompt = document.getElementById('cards-prompt');
+    prompt.textContent = res.error;
+    prompt.className = 'game-result loss';
+    return;
+  }
+  let cards = shuffledDeck().slice(0, 4);
+  while (cards[1].value === cards[0].value) cards = shuffledDeck().slice(0, 4);
+  hiLoRound = { wager: res.amount, cards, step: 0, lost: false };
+  drawHiLoRound();
+}
+
+function shuffledDeck() {
+  const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
+  const deck = [];
+  for (const suit of suits) {
+    for (let value = 1; value <= 13; value++) deck.push({ suit, value });
+  }
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function drawHiLoRound() {
+  const table = document.getElementById('cards-table');
+  const prompt = document.getElementById('cards-prompt');
+  const actions = document.getElementById('cards-actions');
+  if (!table || !prompt || !actions || !hiLoRound) return;
+
+  table.innerHTML = hiLoRound.cards.map((card, i) =>
+    i < hiLoRound.step || hiLoRound.lost ? cardHTML(card) : cardBackHTML()
+  ).join('');
+
+  if (hiLoRound.lost) {
+    prompt.textContent = 'Missed. Deal again for a new round.';
+    prompt.className = 'game-result loss';
+    actions.innerHTML = '';
+    hiLoRound = null;
+    return;
+  }
+
+  if (hiLoRound.step >= 4) {
+    const payout = +(hiLoRound.wager * 8).toFixed(2);
+    awardGamePayout(payout, 'High Low Cards');
+    prompt.textContent = `Perfect run. Paid ${fmt$(payout)}.`;
+    prompt.className = 'game-result win';
+    actions.innerHTML = '';
+    hiLoRound = null;
+    return;
+  }
+
+  const prompts = [
+    ['First card color?', ['red', 'black']],
+    ['Second card: higher or lower than the first?', ['higher', 'lower']],
+    ['Third card: higher, lower, or between the first two?', ['higher', 'lower', 'between']],
+    ['Final card suit?', ['hearts', 'diamonds', 'clubs', 'spades']]
+  ];
+  prompt.textContent = prompts[hiLoRound.step][0];
+  prompt.className = 'game-result';
+  actions.innerHTML = prompts[hiLoRound.step][1].map(choice =>
+    `<button class="btn btn-ghost card-choice" data-choice="${choice}">${choiceLabel(choice)}</button>`
+  ).join('');
+  actions.querySelectorAll('.card-choice').forEach(btn => {
+    btn.addEventListener('click', () => guessHiLo(btn.dataset.choice));
+  });
+}
+
+function cardHTML(card) {
+  const red = card.suit === 'hearts' || card.suit === 'diamonds';
+  return `<div class="playing-card ${red ? 'red' : 'black'}"><span>${cardValueLabel(card.value)}</span><span>${suitSymbol(card.suit)}</span></div>`;
+}
+
+function cardValueLabel(value) {
+  return { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' }[value] || String(value);
+}
+
+function suitSymbol(suit) {
+  return { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' }[suit];
+}
+
+function choiceLabel(choice) {
+  return choice.charAt(0).toUpperCase() + choice.slice(1);
+}
+
+function guessHiLo(choice) {
+  if (!hiLoRound) return;
+  const c = hiLoRound.cards;
+  let correct = false;
+  if (hiLoRound.step === 0) {
+    correct = choice === ((c[0].suit === 'hearts' || c[0].suit === 'diamonds') ? 'red' : 'black');
+  } else if (hiLoRound.step === 1) {
+    correct = choice === (c[1].value > c[0].value ? 'higher' : 'lower') && c[1].value !== c[0].value;
+  } else if (hiLoRound.step === 2) {
+    const low = Math.min(c[0].value, c[1].value);
+    const high = Math.max(c[0].value, c[1].value);
+    const actual = c[2].value > high ? 'higher' : c[2].value < low ? 'lower' : 'between';
+    correct = choice === actual;
+  } else {
+    correct = choice === c[3].suit;
+  }
+  hiLoRound.lost = !correct;
+  if (correct) hiLoRound.step += 1;
+  drawHiLoRound();
+}
+
+function renderRunnerGame(content) {
+  content.innerHTML = `
+    <div class="game-layout">
+      <div class="game-panel">
+        <div class="game-panel-head">
+          <div>
+            <h3>Runner</h3>
+            <p>Start, jump with Space, and cash out after the run.</p>
+          </div>
+          <span class="game-chip">Score pays up to 6x</span>
+        </div>
+        <div class="game-controls">
+          <div class="field">
+            <label>Wager</label>
+            <div class="amount-row">
+              <span class="amount-prefix">$</span>
+              <input id="runner-wager" type="number" min="0.01" step="0.01" value="${dinoState.wager || 5}">
+            </div>
+          </div>
+          <button class="btn btn-primary btn-large" id="runner-start-btn">Start</button>
+          <button class="btn btn-ghost btn-large" id="runner-jump-btn">Jump</button>
+        </div>
+        <div class="runner-wrap">
+          <canvas id="runner-canvas" width="760" height="260"></canvas>
+          <div id="runner-overlay" class="runner-overlay">Press Start</div>
+        </div>
+        <div id="runner-result" class="game-result">Best score: ${Math.floor(dinoState.best)}</div>
+      </div>
+      <div class="game-side">
+        <div class="game-side-stat"><span>Space</span><strong>Jump</strong></div>
+        <div class="game-side-stat"><span>50 score</span><strong>1.5x</strong></div>
+        <div class="game-side-stat"><span>100 score</span><strong>3x</strong></div>
+        <div class="game-side-stat"><span>200 score</span><strong>6x cap</strong></div>
+      </div>
+    </div>
+  `;
+  drawRunnerScene();
+  document.getElementById('runner-start-btn').addEventListener('click', startDinoGame);
+  document.getElementById('runner-jump-btn').addEventListener('click', jumpDino);
+}
+
+function startDinoGame() {
+  stopDinoGame();
+  const res = placeGameWager(document.getElementById('runner-wager').value, 'Runner');
+  const result = document.getElementById('runner-result');
+  if (!res.success) {
+    result.textContent = res.error;
+    result.className = 'game-result loss';
+    return;
+  }
+  dinoState = {
+    ...dinoState,
+    running: true,
+    over: false,
+    score: 0,
+    wager: res.amount,
+    playerY: 0,
+    velocity: 0,
+    obstacles: [],
+    lastTs: performance.now(),
+    spawnTimer: 700
+  };
+  document.getElementById('runner-overlay').style.display = 'none';
+  dinoState.frame = requestAnimationFrame(tickDinoGame);
+}
+
+function stopDinoGame() {
+  if (dinoState.frame) cancelAnimationFrame(dinoState.frame);
+  dinoState.frame = null;
+  dinoState.running = false;
+}
+
+function jumpDino() {
+  if (!dinoState.running || dinoState.playerY > 2) return;
+  dinoState.velocity = 11.8;
+}
+
+function tickDinoGame(ts) {
+  if (!dinoState.running) return;
+  const dt = Math.min(32, ts - dinoState.lastTs);
+  dinoState.lastTs = ts;
+  dinoState.score += dt * 0.028;
+  dinoState.velocity -= dt * 0.035;
+  dinoState.playerY = Math.max(0, dinoState.playerY + dinoState.velocity);
+  if (dinoState.playerY === 0 && dinoState.velocity < 0) dinoState.velocity = 0;
+
+  const speed = 0.28 + Math.min(0.16, dinoState.score / 900);
+  dinoState.spawnTimer -= dt;
+  if (dinoState.spawnTimer <= 0) {
+    dinoState.obstacles.push({ x: 780, w: 18 + Math.random() * 18, h: 30 + Math.random() * 34 });
+    dinoState.spawnTimer = 760 + Math.random() * 760;
+  }
+  dinoState.obstacles.forEach(o => { o.x -= dt * speed; });
+  dinoState.obstacles = dinoState.obstacles.filter(o => o.x > -50);
+
+  if (runnerHasCollision()) {
+    endDinoGame();
+    return;
+  }
+  drawRunnerScene();
+  dinoState.frame = requestAnimationFrame(tickDinoGame);
+}
+
+function runnerHasCollision() {
+  const player = { x: 76, y: 190 - dinoState.playerY, w: 34, h: 42 };
+  return dinoState.obstacles.some(o => {
+    const obstacle = { x: o.x, y: 232 - o.h, w: o.w, h: o.h };
+    return player.x < obstacle.x + obstacle.w &&
+      player.x + player.w > obstacle.x &&
+      player.y < obstacle.y + obstacle.h &&
+      player.y + player.h > obstacle.y;
+  });
+}
+
+function endDinoGame() {
+  stopDinoGame();
+  dinoState.over = true;
+  dinoState.best = Math.max(dinoState.best, dinoState.score);
+  const mult = Math.min(6, Math.max(0, dinoState.score / 34));
+  const payout = +(dinoState.wager * mult).toFixed(2);
+  awardGamePayout(payout, 'Runner');
+  drawRunnerScene();
+  const overlay = document.getElementById('runner-overlay');
+  const result = document.getElementById('runner-result');
+  if (overlay) {
+    overlay.style.display = 'flex';
+    overlay.textContent = 'Game Over';
+  }
+  if (result) {
+    result.textContent = `Score ${Math.floor(dinoState.score)}. ${mult.toFixed(2)}x paid ${fmt$(payout)}.`;
+    result.className = `game-result ${payout > dinoState.wager ? 'win' : 'loss'}`;
+  }
+}
+
+function drawRunnerScene() {
+  const canvas = document.getElementById('runner-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#10131d';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#363a52';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, 233);
+  ctx.lineTo(canvas.width, 233);
+  ctx.stroke();
+  ctx.fillStyle = '#6366f1';
+  ctx.fillRect(76, 190 - dinoState.playerY, 34, 42);
+  ctx.fillStyle = '#22c55e';
+  for (const o of dinoState.obstacles) ctx.fillRect(o.x, 232 - o.h, o.w, o.h);
+  ctx.fillStyle = '#e8eaf6';
+  ctx.font = '700 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+  ctx.fillText(`Score ${Math.floor(dinoState.score)}`, 18, 30);
+}
+
 // ── Modal ──────────────────────────────────────────────────────────────────
 function openModal(marketId) {
   const m = appData.markets.find(x => x.id === marketId);
@@ -2141,6 +2653,13 @@ window.addEventListener('DOMContentLoaded', () => {
 
   document.querySelectorAll('.nav-link').forEach(link => {
     link.addEventListener('click', () => showView(link.dataset.view));
+  });
+
+  window.addEventListener('keydown', e => {
+    if (activeView === 'games' && activeGamesTab === 'runner' && e.code === 'Space') {
+      e.preventDefault();
+      jumpDino();
+    }
   });
 
   document.getElementById('logout-btn').addEventListener('click', logout);
