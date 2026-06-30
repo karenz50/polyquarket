@@ -131,6 +131,11 @@ let dinoState = {
   spawnTimer: 0,
   frame: null
 };
+const quarkRunnerLogo = new Image();
+quarkRunnerLogo.src = 'logo.png';
+quarkRunnerLogo.onload = () => {
+  if (activeView === 'games' && activeGamesTab === 'runner') drawRunnerScene();
+};
 let selectedChatUser = null;
 let chatUserSearch = '';
 let networkAnimationFrame = null;
@@ -1785,7 +1790,7 @@ function renderGames() {
       <div class="explore-tabs">
         <button class="explore-tab ${activeGamesTab === 'plinko' ? 'active' : ''}" data-gtab="plinko">Luck</button>
         <button class="explore-tab ${activeGamesTab === 'cards' ? 'active' : ''}" data-gtab="cards">Cards</button>
-        <button class="explore-tab ${activeGamesTab === 'runner' ? 'active' : ''}" data-gtab="runner">Runner</button>
+        <button class="explore-tab ${activeGamesTab === 'runner' ? 'active' : ''}" data-gtab="runner">Quark Run</button>
       </div>
       <div id="games-content"></div>
     </div>
@@ -2144,12 +2149,12 @@ function saveRunnerHighScore(score) {
 function runnerLeaderboardHTML() {
   const top = Object.entries(appData.runnerScores || {})
     .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0))
-    .slice(0, 10);
+    .slice(0, 5);
 
   return `
     <div class="runner-leaderboard">
       <div class="runner-leaderboard-head">
-        <h3>Runner Leaderboard</h3>
+        <h3>Quark Run Leaderboard</h3>
         <span>Top scores</span>
       </div>
       <div class="explore-panel-list runner-leaderboard-list">
@@ -2184,8 +2189,8 @@ function renderRunnerGame(content) {
         <div class="game-panel">
           <div class="game-panel-head">
             <div>
-              <h3>Runner</h3>
-              <p>Start, jump with Space, and survive as the pace climbs.</p>
+              <h3>Quark Run</h3>
+              <p>You are a runaway particle escaping pesky scientists. Run as far as you can and jump with Space to stay free.</p>
             </div>
             <span class="game-chip">Score pays up to 6x</span>
           </div>
@@ -2207,8 +2212,8 @@ function renderRunnerGame(content) {
         </div>
         <div class="game-side">
           <div class="game-side-stat"><span>Space</span><strong>Jump</strong></div>
-          <div class="game-side-stat"><span>60 score</span><strong>2x</strong></div>
-          <div class="game-side-stat"><span>120 score</span><strong>4x</strong></div>
+          <div class="game-side-stat"><span>60 score</span><strong>1.5x</strong></div>
+          <div class="game-side-stat"><span>120 score</span><strong>3x</strong></div>
           <div class="game-side-stat"><span>180 score</span><strong>6x cap</strong></div>
         </div>
       </div>
@@ -2221,7 +2226,7 @@ function renderRunnerGame(content) {
 
 function startDinoGame() {
   stopDinoGame();
-  const res = placeGameWager(document.getElementById('runner-wager').value, 'Runner');
+  const res = placeGameWager(document.getElementById('runner-wager').value, 'Quark Run');
   const result = document.getElementById('runner-result');
   if (!res.success) {
     result.textContent = res.error;
@@ -2259,7 +2264,7 @@ function tickDinoGame(ts) {
   if (!dinoState.running) return;
   const dt = Math.min(32, ts - dinoState.lastTs);
   dinoState.lastTs = ts;
-  dinoState.score += dt * 0.01;
+  dinoState.score += dt * 0.0065;
   dinoState.velocity -= dt * 0.041;
   dinoState.playerY = Math.max(0, dinoState.playerY + dinoState.velocity);
   if (dinoState.playerY === 0 && dinoState.velocity < 0) dinoState.velocity = 0;
@@ -2267,12 +2272,8 @@ function tickDinoGame(ts) {
   const speed = runnerSpeed();
   dinoState.spawnTimer -= dt;
   if (dinoState.spawnTimer <= 0) {
-    dinoState.obstacles.push({
-      x: 780,
-      w: 24 + Math.random() * 22,
-      h: 36 + Math.random() * 44
-    });
-    dinoState.spawnTimer = Math.max(420, 860 - dinoState.score * 3) + Math.random() * Math.max(260, 620 - dinoState.score * 1.8);
+    spawnRunnerObstacles();
+    dinoState.spawnTimer = nextRunnerSpawnDelay();
   }
   dinoState.obstacles.forEach(o => { o.x -= dt * speed; });
   dinoState.obstacles = dinoState.obstacles.filter(o => o.x > -50);
@@ -2286,7 +2287,7 @@ function tickDinoGame(ts) {
 }
 
 function runnerHasCollision() {
-  const player = { x: 76, y: 190 - dinoState.playerY, w: 34, h: 42 };
+  const player = { x: 76, y: 188 - dinoState.playerY, w: 42, h: 42 };
   return dinoState.obstacles.some(o => {
     const obstacle = { x: o.x, y: 232 - o.h, w: o.w, h: o.h };
     return player.x < obstacle.x + obstacle.w &&
@@ -2302,9 +2303,9 @@ function endDinoGame() {
   const finalScore = Math.floor(dinoState.score);
   dinoState.best = Math.max(dinoState.best, finalScore);
   saveRunnerHighScore(finalScore);
-  const mult = Math.min(6, Math.max(0, dinoState.score / 30));
+  const mult = runnerMultiplier(dinoState.score);
   const payout = +(dinoState.wager * mult).toFixed(2);
-  awardGamePayout(payout, 'Runner');
+  awardGamePayout(payout, 'Quark Run');
   drawRunnerScene();
   const overlay = document.getElementById('runner-overlay');
   const result = document.getElementById('runner-result');
@@ -2323,6 +2324,33 @@ function runnerSpeed() {
   return 0.34 + Math.min(0.56, dinoState.score / 220);
 }
 
+function runnerMultiplier(score) {
+  if (score >= 180) return 6;
+  if (score >= 120) return 3 + ((score - 120) / 60) * 3;
+  return Math.max(0, score / 40);
+}
+
+function spawnRunnerObstacles() {
+  const density = Math.min(1, dinoState.score / 130);
+  const makeObstacle = x => ({
+    x,
+    w: 22 + Math.random() * (18 + density * 10),
+    h: 34 + Math.random() * (36 + density * 18)
+  });
+
+  dinoState.obstacles.push(makeObstacle(780));
+  if (dinoState.score > 45 && Math.random() < density * 0.5) {
+    dinoState.obstacles.push(makeObstacle(780 + 150 + Math.random() * 90));
+  }
+}
+
+function nextRunnerSpawnDelay() {
+  const density = Math.min(1, dinoState.score / 160);
+  const base = 980 - density * 390;
+  const jitter = 520 - density * 260;
+  return Math.max(460, base + Math.random() * jitter);
+}
+
 function drawRunnerScene() {
   const canvas = document.getElementById('runner-canvas');
   if (!canvas) return;
@@ -2336,13 +2364,21 @@ function drawRunnerScene() {
   ctx.moveTo(0, 233);
   ctx.lineTo(canvas.width, 233);
   ctx.stroke();
-  ctx.fillStyle = '#6366f1';
-  ctx.fillRect(76, 190 - dinoState.playerY, 34, 42);
+  drawQuarkRunnerSprite(ctx, 76, 188 - dinoState.playerY, 42);
   ctx.fillStyle = '#22c55e';
   for (const o of dinoState.obstacles) ctx.fillRect(o.x, 232 - o.h, o.w, o.h);
   ctx.fillStyle = '#e8eaf6';
   ctx.font = '700 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
   ctx.fillText(`Score ${Math.floor(dinoState.score)}`, 18, 30);
+}
+
+function drawQuarkRunnerSprite(ctx, x, y, size) {
+  if (quarkRunnerLogo.complete && quarkRunnerLogo.naturalWidth > 0) {
+    ctx.drawImage(quarkRunnerLogo, x, y, size, size);
+    return;
+  }
+  ctx.fillStyle = '#6366f1';
+  ctx.fillRect(x + 4, y, size - 8, size);
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────
