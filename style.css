@@ -1654,6 +1654,12 @@ select option { background: var(--surface2); }
   align-items: start;
 }
 
+.game-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .game-panel,
 .game-side {
   background: var(--surface);
@@ -1699,6 +1705,10 @@ select option { background: var(--surface2); }
   gap: 12px;
   align-items: end;
   margin-bottom: 18px;
+}
+
+.runner-controls {
+  grid-template-columns: minmax(150px, 1fr) auto;
 }
 
 .game-result {
@@ -1876,6 +1886,40 @@ select option { background: var(--surface2); }
   font-size: 22px;
   font-weight: 900;
   letter-spacing: .2px;
+}
+
+.runner-leaderboard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.runner-leaderboard-head {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runner-leaderboard-head h3 {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.runner-leaderboard-head span {
+  color: var(--text3);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.runner-leaderboard-list {
+  border: none;
+  border-radius: 0;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */

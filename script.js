@@ -7,7 +7,7 @@ const db = firebase.database();
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SESSION_KEY = 'polyquarket_session_v3';
-const CURRENT_DATA_VERSION = 3;
+const CURRENT_DATA_VERSION = 4;
 
 
 const DEFAULT_DATA = {
@@ -17,6 +17,7 @@ const DEFAULT_DATA = {
     elizabeth: { password: 'goat', role: 'admin', balance: 670, chattedWith: {} }
   },
   chats: {},
+  runnerScores: {},
   markets: [
     {
       id: 'demo0',
@@ -153,6 +154,10 @@ function ensureChatDataShape() {
   }
 }
 
+function ensureGameDataShape() {
+  if (!appData.runnerScores) appData.runnerScores = {};
+}
+
 function chatHasMessages(chat) {
   return Array.isArray(chat?.messages) && chat.messages.length > 0;
 }
@@ -212,6 +217,9 @@ function applyMigrations(fromVersion) {
   if (fromVersion < 3) {
     ensureChatDataShape();
   }
+  if (fromVersion < 4) {
+    ensureGameDataShape();
+  }
   if (!appData.meta) appData.meta = {};
   appData.meta.dataVersion = CURRENT_DATA_VERSION;
   saveData();
@@ -228,8 +236,10 @@ function startRealtimeListener() {
         if (!appData.users)        appData.users        = deepCopy(DEFAULT_DATA.users);
         if (!appData.markets)      appData.markets      = deepCopy(DEFAULT_DATA.markets);
         if (!appData.chats)        appData.chats        = {};
+        if (!appData.runnerScores) appData.runnerScores = {};
         if (!appData.meta)         appData.meta         = { dataVersion: 0 };
         ensureChatDataShape();
+        ensureGameDataShape();
         const prunedEmptyChats = pruneEmptyChats();
         if (!appData.notifyEmails) {
           appData.notifyEmails = ['efield@uchicago.edu'];
@@ -258,13 +268,16 @@ function startRealtimeListener() {
     if (!data) return;
     appData = data;
     ensureChatDataShape();
+    ensureGameDataShape();
     if (pruneEmptyChats()) saveData();
     syncCurrentUser();
     if (currentUser) {
       switch (activeView) {
         case 'markets':   renderMarkets();   break;
         case 'explore':   renderExplore();   break;
-        case 'games':     break;
+        case 'games':
+          if (activeGamesTab === 'runner' && !dinoState.running) renderRunnerLeaderboard();
+          break;
         case 'portfolio': renderPortfolio(); break;
         case 'chat':      renderChat();      break;
         case 'admin':     renderAdmin();     break;
@@ -2112,45 +2125,98 @@ function cardResultText(correct, payout) {
   return `${correct} correct. No payout this round.`;
 }
 
+function getRunnerHighScore(username) {
+  if (!username) return 0;
+  return Number(appData.runnerScores?.[username]?.score || 0);
+}
+
+function saveRunnerHighScore(score) {
+  if (!currentUser || score <= getRunnerHighScore(currentUser.username)) return false;
+  ensureGameDataShape();
+  appData.runnerScores[currentUser.username] = {
+    score,
+    updatedAt: new Date().toISOString()
+  };
+  saveData();
+  return true;
+}
+
+function runnerLeaderboardHTML() {
+  const top = Object.entries(appData.runnerScores || {})
+    .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0))
+    .slice(0, 10);
+
+  return `
+    <div class="runner-leaderboard">
+      <div class="runner-leaderboard-head">
+        <h3>Runner Leaderboard</h3>
+        <span>Top scores</span>
+      </div>
+      <div class="explore-panel-list runner-leaderboard-list">
+        ${top.length ? top.map(([name, entry], i) => runnerLeaderboardRow(name, entry, i + 1)).join('') : '<p class="hint-txt" style="padding:16px">No runner scores yet.</p>'}
+      </div>
+    </div>
+  `;
+}
+
+function runnerLeaderboardRow(name, entry, rank) {
+  const isYou = currentUser && currentUser.username === name;
+  return `
+    <div class="explore-user-row ${isYou ? 'is-you' : ''}">
+      <span class="explore-rank">#${rank}</span>
+      <span class="explore-username">
+        ${esc(name)}${isYou ? '<span class="you-tag">you</span>' : ''}
+      </span>
+      <span class="explore-bal">${Math.floor(entry.score || 0)}</span>
+    </div>
+  `;
+}
+
+function renderRunnerLeaderboard() {
+  const el = document.getElementById('runner-leaderboard');
+  if (el) el.innerHTML = runnerLeaderboardHTML();
+}
+
 function renderRunnerGame(content) {
   content.innerHTML = `
-    <div class="game-layout">
-      <div class="game-panel">
-        <div class="game-panel-head">
-          <div>
-            <h3>Runner</h3>
-            <p>Start, jump with Space, and cash out after the run.</p>
-          </div>
-          <span class="game-chip">Score pays up to 6x</span>
-        </div>
-        <div class="game-controls">
-          <div class="field">
-            <label>Wager</label>
-            <div class="amount-row">
-              <span class="amount-prefix">$</span>
-              <input id="runner-wager" type="number" min="0.01" step="0.01" value="${dinoState.wager || 5}">
+    <div class="game-stack">
+      <div class="game-layout">
+        <div class="game-panel">
+          <div class="game-panel-head">
+            <div>
+              <h3>Runner</h3>
+              <p>Start, jump with Space, and survive as the pace climbs.</p>
             </div>
+            <span class="game-chip">Score pays up to 6x</span>
           </div>
-          <button class="btn btn-primary btn-large" id="runner-start-btn">Start</button>
-          <button class="btn btn-ghost btn-large" id="runner-jump-btn">Jump</button>
+          <div class="game-controls runner-controls">
+            <div class="field">
+              <label>Wager</label>
+              <div class="amount-row">
+                <span class="amount-prefix">$</span>
+                <input id="runner-wager" type="number" min="0.01" step="0.01" value="${dinoState.wager || 5}">
+              </div>
+            </div>
+            <button class="btn btn-primary btn-large" id="runner-start-btn">Start</button>
+          </div>
+          <div class="runner-wrap">
+            <canvas id="runner-canvas" width="760" height="260"></canvas>
+            <div id="runner-overlay" class="runner-overlay">Press Start</div>
+          </div>
+          <div id="runner-result" class="game-result">Best score: ${Math.floor(getRunnerHighScore(currentUser?.username))}</div>
         </div>
-        <div class="runner-wrap">
-          <canvas id="runner-canvas" width="760" height="260"></canvas>
-          <div id="runner-overlay" class="runner-overlay">Press Start</div>
+        <div class="game-side">
+          <div class="game-side-stat"><span>Space</span><strong>Jump</strong></div>
+          <div class="game-side-stat"><span>60 score</span><strong>2x</strong></div>
+          <div class="game-side-stat"><span>120 score</span><strong>4x</strong></div>
+          <div class="game-side-stat"><span>180 score</span><strong>6x cap</strong></div>
         </div>
-        <div id="runner-result" class="game-result">Best score: ${Math.floor(dinoState.best)}</div>
       </div>
-      <div class="game-side">
-        <div class="game-side-stat"><span>Space</span><strong>Jump</strong></div>
-        <div class="game-side-stat"><span>50 score</span><strong>1.5x</strong></div>
-        <div class="game-side-stat"><span>100 score</span><strong>3x</strong></div>
-        <div class="game-side-stat"><span>200 score</span><strong>6x cap</strong></div>
-      </div>
+      <div id="runner-leaderboard">${runnerLeaderboardHTML()}</div>
     </div>
   `;
   drawRunnerScene();
   document.getElementById('runner-start-btn').addEventListener('click', startDinoGame);
-  document.getElementById('runner-jump-btn').addEventListener('click', jumpDino);
 }
 
 function startDinoGame() {
@@ -2172,7 +2238,7 @@ function startDinoGame() {
     velocity: 0,
     obstacles: [],
     lastTs: performance.now(),
-    spawnTimer: 700
+    spawnTimer: 560
   };
   document.getElementById('runner-overlay').style.display = 'none';
   dinoState.frame = requestAnimationFrame(tickDinoGame);
@@ -2186,23 +2252,27 @@ function stopDinoGame() {
 
 function jumpDino() {
   if (!dinoState.running || dinoState.playerY > 2) return;
-  dinoState.velocity = 11.8;
+  dinoState.velocity = 10.4;
 }
 
 function tickDinoGame(ts) {
   if (!dinoState.running) return;
   const dt = Math.min(32, ts - dinoState.lastTs);
   dinoState.lastTs = ts;
-  dinoState.score += dt * 0.028;
-  dinoState.velocity -= dt * 0.035;
+  dinoState.score += dt * 0.01;
+  dinoState.velocity -= dt * 0.041;
   dinoState.playerY = Math.max(0, dinoState.playerY + dinoState.velocity);
   if (dinoState.playerY === 0 && dinoState.velocity < 0) dinoState.velocity = 0;
 
-  const speed = 0.28 + Math.min(0.16, dinoState.score / 900);
+  const speed = runnerSpeed();
   dinoState.spawnTimer -= dt;
   if (dinoState.spawnTimer <= 0) {
-    dinoState.obstacles.push({ x: 780, w: 18 + Math.random() * 18, h: 30 + Math.random() * 34 });
-    dinoState.spawnTimer = 760 + Math.random() * 760;
+    dinoState.obstacles.push({
+      x: 780,
+      w: 24 + Math.random() * 22,
+      h: 36 + Math.random() * 44
+    });
+    dinoState.spawnTimer = Math.max(420, 860 - dinoState.score * 3) + Math.random() * Math.max(260, 620 - dinoState.score * 1.8);
   }
   dinoState.obstacles.forEach(o => { o.x -= dt * speed; });
   dinoState.obstacles = dinoState.obstacles.filter(o => o.x > -50);
@@ -2229,8 +2299,10 @@ function runnerHasCollision() {
 function endDinoGame() {
   stopDinoGame();
   dinoState.over = true;
-  dinoState.best = Math.max(dinoState.best, dinoState.score);
-  const mult = Math.min(6, Math.max(0, dinoState.score / 34));
+  const finalScore = Math.floor(dinoState.score);
+  dinoState.best = Math.max(dinoState.best, finalScore);
+  saveRunnerHighScore(finalScore);
+  const mult = Math.min(6, Math.max(0, dinoState.score / 30));
   const payout = +(dinoState.wager * mult).toFixed(2);
   awardGamePayout(payout, 'Runner');
   drawRunnerScene();
@@ -2241,9 +2313,14 @@ function endDinoGame() {
     overlay.textContent = 'Game Over';
   }
   if (result) {
-    result.textContent = `Score ${Math.floor(dinoState.score)}. ${mult.toFixed(2)}x paid ${fmt$(payout)}.`;
+    result.textContent = `Score ${finalScore}. ${mult.toFixed(2)}x paid ${fmt$(payout)}.`;
     result.className = `game-result ${payout > dinoState.wager ? 'win' : 'loss'}`;
   }
+  renderRunnerLeaderboard();
+}
+
+function runnerSpeed() {
+  return 0.34 + Math.min(0.56, dinoState.score / 220);
 }
 
 function drawRunnerScene() {
