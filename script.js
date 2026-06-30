@@ -2030,8 +2030,11 @@ function initNetworkBackground() {
         }
       }
 
+      applyParticleSpacing(p);
+
       p.vx *= 0.992;
       p.vy *= 0.992;
+      stabilizeParticleSpeed(p);
 
       if (p.x < -20) p.x = width + 20;
       if (p.x > width + 20) p.x = -20;
@@ -2075,6 +2078,42 @@ function initNetworkBackground() {
     }
 
     networkAnimationFrame = requestAnimationFrame(tick);
+  }
+
+  function applyParticleSpacing(particle) {
+    if (prefersReducedMotion) return;
+    const minSpacing = 76;
+    for (const other of particles) {
+      if (other === particle) continue;
+      const dx = particle.x - other.x;
+      const dy = particle.y - other.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= 0 || distSq > minSpacing * minSpacing) continue;
+
+      const dist = Math.sqrt(distSq);
+      const push = (1 - dist / minSpacing) * 0.006;
+      particle.vx += (dx / dist) * push;
+      particle.vy += (dy / dist) * push;
+    }
+  }
+
+  function stabilizeParticleSpeed(particle) {
+    if (prefersReducedMotion) return;
+    const speed = Math.hypot(particle.vx, particle.vy);
+    const minSpeed = 0.035;
+    const maxSpeed = 0.22;
+
+    if (speed < minSpeed) {
+      const angle = speed > 0 ? Math.atan2(particle.vy, particle.vx) : particle.drift;
+      particle.vx = Math.cos(angle) * minSpeed;
+      particle.vy = Math.sin(angle) * minSpeed;
+      return;
+    }
+
+    if (speed > maxSpeed) {
+      particle.vx = (particle.vx / speed) * maxSpeed;
+      particle.vy = (particle.vy / speed) * maxSpeed;
+    }
   }
 
   window.addEventListener('resize', resize);
