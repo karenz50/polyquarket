@@ -117,6 +117,7 @@ let activeExploreTab = 'trending';
 let exploreChartFilter = 'all';
 let selectedChatUser = null;
 let chatUserSearch = '';
+let networkAnimationFrame = null;
 
 // ── Storage ────────────────────────────────────────────────────────────────
 let _dbInitialized = false;
@@ -1940,8 +1941,161 @@ function showToast(msg, type = 'info') {
   }, 3000);
 }
 
+// ── Animated Network Background ────────────────────────────────────────────
+function initNetworkBackground() {
+  const canvas = document.getElementById('network-bg');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const pointer = { x: null, y: null };
+  let particles = [];
+  let width = 0;
+  let height = 0;
+  let dpr = 1;
+  let frame = 0;
+
+  function particleCount() {
+    return Math.max(90, Math.min(190, Math.floor((width * height) / 9500)));
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const nextCount = particleCount();
+    if (particles.length > nextCount) {
+      particles = particles.slice(0, nextCount);
+    }
+    while (particles.length < nextCount) {
+      particles.push(createParticle());
+    }
+  }
+
+  function createParticle() {
+    const speed = prefersReducedMotion ? 0 : 0.035 + Math.random() * 0.11;
+    const angle = Math.random() * Math.PI * 2;
+    return {
+      x: Math.random() * width,
+      y: Math.random() * height,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      r: 1.2 + Math.random() * 2.5,
+      drift: Math.random() * Math.PI * 2,
+      driftSpeed: 0.004 + Math.random() * 0.008,
+      glow: Math.random() > 0.82
+    };
+  }
+
+  function drawBackground() {
+    const gradient = ctx.createRadialGradient(width * 0.5, height * 0.22, 0, width * 0.5, height * 0.22, Math.max(width, height) * 0.76);
+    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.14)');
+    gradient.addColorStop(0.42, 'rgba(13, 14, 19, 0.54)');
+    gradient.addColorStop(1, 'rgba(4, 8, 18, 0.96)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  function tick() {
+    frame += 1;
+    ctx.clearRect(0, 0, width, height);
+    drawBackground();
+
+    for (const p of particles) {
+      if (!prefersReducedMotion) {
+        p.drift += p.driftSpeed;
+        p.vx += Math.cos(p.drift + frame * 0.0012) * 0.0022;
+        p.vy += Math.sin(p.drift * 0.9 + frame * 0.001) * 0.0022;
+      }
+
+      p.x += p.vx;
+      p.y += p.vy;
+
+      if (pointer.x !== null && !prefersReducedMotion) {
+        const dx = pointer.x - p.x;
+        const dy = pointer.y - p.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < 36000 && distSq > 1) {
+          const force = (1 - distSq / 36000) * 0.011;
+          p.vx += dx * force / Math.sqrt(distSq);
+          p.vy += dy * force / Math.sqrt(distSq);
+        }
+      }
+
+      p.vx *= 0.992;
+      p.vy *= 0.992;
+
+      if (p.x < -20) p.x = width + 20;
+      if (p.x > width + 20) p.x = -20;
+      if (p.y < -20) p.y = height + 20;
+      if (p.y > height + 20) p.y = -20;
+    }
+
+    const maxDist = 170;
+    for (let i = 0; i < particles.length; i++) {
+      const a = particles[i];
+      for (let j = i + 1; j < particles.length; j++) {
+        const b = particles[j];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < maxDist) {
+          const alpha = (1 - dist / maxDist) * 0.14;
+          ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    for (const p of particles) {
+      const alpha = p.glow ? 0.56 : 0.34;
+      ctx.fillStyle = `rgba(56, 189, 248, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (p.glow) {
+        ctx.fillStyle = 'rgba(99, 102, 241, 0.1)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * 3.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    networkAnimationFrame = requestAnimationFrame(tick);
+  }
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', e => {
+    pointer.x = e.clientX;
+    pointer.y = e.clientY;
+  });
+  window.addEventListener('mouseleave', () => {
+    pointer.x = null;
+    pointer.y = null;
+  });
+
+  if (networkAnimationFrame) cancelAnimationFrame(networkAnimationFrame);
+  resize();
+  tick();
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  initNetworkBackground();
+
   document.getElementById('market-modal').addEventListener('click', e => {
     if (e.target === e.currentTarget) closeModal();
   });

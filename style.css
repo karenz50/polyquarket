@@ -25,13 +25,41 @@
   --shadow:    0 4px 24px rgba(0,0,0,.4);
 }
 
+html {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 50% 24%, rgba(99,102,241,.16), transparent 34%),
+    radial-gradient(circle at 80% 10%, rgba(14,165,233,.08), transparent 28%),
+    linear-gradient(135deg, #070b18 0%, #0d0e13 48%, #130d1c 100%);
+}
+
 html, body {
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: var(--bg);
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
+}
+
+body {
+  position: relative;
+  overflow-x: hidden;
+  background: transparent;
+}
+
+#network-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  display: block;
+}
+
+body > *:not(#network-bg) {
+  position: relative;
+  z-index: 1;
 }
 
 a { color: var(--primary); text-decoration: none; }
@@ -177,7 +205,12 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
 #logout-btn:hover { border-color: var(--no); color: var(--no); }
 
 /* ── Views ─────────────────────────────────────────────────────────────── */
-.view { display: none; min-height: calc(100vh - 60px); }
+.view {
+  display: none;
+  min-height: calc(100vh - 60px);
+  position: relative;
+  z-index: 1;
+}
 .view.active { display: block; }
 
 .page-inner {
@@ -1003,7 +1036,7 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
 .modal-admin-label { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--primary); letter-spacing: .5px; margin-right: auto; }
 
 /* ── Login ─────────────────────────────────────────────────────────────── */
-#view-login { min-height: 100vh; background: var(--bg); display: none; }
+#view-login { min-height: 100vh; background: transparent; display: none; }
 #view-login.active { display: flex; align-items: center; justify-content: center; }
 
 .login-wrap {
