@@ -2208,6 +2208,7 @@ function renderRunnerGame(content) {
             <canvas id="runner-canvas" width="760" height="260"></canvas>
             <div id="runner-overlay" class="runner-overlay">Press Start</div>
           </div>
+          <button class="btn btn-ghost btn-large w-full runner-mobile-jump" id="runner-mobile-jump-btn">Jump</button>
           <div id="runner-result" class="game-result">Best score: ${Math.floor(getRunnerHighScore(currentUser?.username))}</div>
         </div>
         <div class="game-side">
@@ -2222,6 +2223,7 @@ function renderRunnerGame(content) {
   `;
   drawRunnerScene();
   document.getElementById('runner-start-btn').addEventListener('click', startDinoGame);
+  document.getElementById('runner-mobile-jump-btn').addEventListener('click', jumpDino);
 }
 
 function startDinoGame() {

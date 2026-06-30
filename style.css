@@ -1888,6 +1888,11 @@ select option { background: var(--surface2); }
   letter-spacing: .2px;
 }
 
+.runner-mobile-jump {
+  display: none;
+  margin-top: 12px;
+}
+
 .runner-leaderboard {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2024,6 +2029,7 @@ select option { background: var(--surface2); }
   .game-panel { padding: 16px; }
   .game-panel-head { flex-direction: column; gap: 10px; }
   .game-controls { grid-template-columns: 1fr; }
+  .runner-mobile-jump { display: inline-flex; }
   .plinko-board { height: 320px; }
   .cards-table { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .playing-card {
