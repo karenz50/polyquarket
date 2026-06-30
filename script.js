@@ -1770,8 +1770,8 @@ function renderGames() {
         <p class="hero-sub">Fast mini games with instant balance updates</p>
       </div>
       <div class="explore-tabs">
-        <button class="explore-tab ${activeGamesTab === 'plinko' ? 'active' : ''}" data-gtab="plinko">Plinko</button>
-        <button class="explore-tab ${activeGamesTab === 'cards' ? 'active' : ''}" data-gtab="cards">High Low Cards</button>
+        <button class="explore-tab ${activeGamesTab === 'plinko' ? 'active' : ''}" data-gtab="plinko">Luck</button>
+        <button class="explore-tab ${activeGamesTab === 'cards' ? 'active' : ''}" data-gtab="cards">Cards</button>
         <button class="explore-tab ${activeGamesTab === 'runner' ? 'active' : ''}" data-gtab="runner">Runner</button>
       </div>
       <div id="games-content"></div>
@@ -1832,7 +1832,7 @@ function renderPlinkoGame(content) {
       <div class="game-panel">
         <div class="game-panel-head">
           <div>
-            <h3>Plinko</h3>
+            <h3>Luck</h3>
             <p>Pick a risk level, drop the chip, and land in a multiplier bucket.</p>
           </div>
           <span class="game-chip">Balance ${fmt$(userData().balance)}</span>
@@ -1905,7 +1905,7 @@ function playPlinko() {
   const btn = document.getElementById('plinko-drop-btn');
   const risk = document.getElementById('plinko-risk').value;
   const wager = document.getElementById('plinko-wager').value;
-  const res = placeGameWager(wager, 'Plinko');
+  const res = placeGameWager(wager, 'Luck');
   const resultEl = document.getElementById('plinko-result');
   if (!res.success) {
     resultEl.textContent = res.error;
@@ -1932,7 +1932,7 @@ function playPlinko() {
   });
 
   setTimeout(() => {
-    awardGamePayout(payout, 'Plinko');
+    awardGamePayout(payout, 'Luck');
     resultEl.textContent = `${mult}x multiplier. ${payout > 0 ? `Paid ${fmt$(payout)}.` : 'No payout this drop.'}`;
     resultEl.className = `game-result ${payout > res.amount ? 'win' : 'loss'}`;
     btn.disabled = false;
@@ -1955,10 +1955,10 @@ function renderCardGame(content) {
       <div class="game-panel">
         <div class="game-panel-head">
           <div>
-            <h3>High Low Cards</h3>
-            <p>Four calls: color, higher/lower, outside/inside, then suit.</p>
+            <h3>Cards</h3>
+            <p>Make four calls, then get paid from your final score.</p>
           </div>
-          <span class="game-chip">4 correct pays 8x</span>
+          <span class="game-chip">2 = push · 3 = 2.5x · 4 = 8x</span>
         </div>
         <div class="game-controls">
           <div class="field">
@@ -1976,8 +1976,8 @@ function renderCardGame(content) {
       </div>
       <div class="game-side">
         <div class="game-side-stat"><span>Step 1</span><strong>Red or black</strong></div>
-        <div class="game-side-stat"><span>Step 2</span><strong>Higher or lower</strong></div>
-        <div class="game-side-stat"><span>Step 3</span><strong>Higher, lower, or between</strong></div>
+        <div class="game-side-stat"><span>Step 2</span><strong>Higher, lower, or same</strong></div>
+        <div class="game-side-stat"><span>Step 3</span><strong>Higher, lower, same, or between</strong></div>
         <div class="game-side-stat"><span>Step 4</span><strong>Exact suit</strong></div>
       </div>
     </div>
@@ -1991,16 +1991,15 @@ function cardBackHTML() {
 }
 
 function startHiLoCards() {
-  const res = placeGameWager(document.getElementById('cards-wager').value, 'High Low Cards');
+  const res = placeGameWager(document.getElementById('cards-wager').value, 'Cards');
   if (!res.success) {
     const prompt = document.getElementById('cards-prompt');
     prompt.textContent = res.error;
     prompt.className = 'game-result loss';
     return;
   }
-  let cards = shuffledDeck().slice(0, 4);
-  while (cards[1].value === cards[0].value) cards = shuffledDeck().slice(0, 4);
-  hiLoRound = { wager: res.amount, cards, step: 0, lost: false };
+  const cards = shuffledDeck().slice(0, 4);
+  hiLoRound = { wager: res.amount, cards, step: 0, correct: 0 };
   drawHiLoRound();
 }
 
@@ -2024,22 +2023,15 @@ function drawHiLoRound() {
   if (!table || !prompt || !actions || !hiLoRound) return;
 
   table.innerHTML = hiLoRound.cards.map((card, i) =>
-    i < hiLoRound.step || hiLoRound.lost ? cardHTML(card) : cardBackHTML()
+    i < hiLoRound.step ? cardHTML(card) : cardBackHTML()
   ).join('');
 
-  if (hiLoRound.lost) {
-    prompt.textContent = 'Missed. Deal again for a new round.';
-    prompt.className = 'game-result loss';
-    actions.innerHTML = '';
-    hiLoRound = null;
-    return;
-  }
-
   if (hiLoRound.step >= 4) {
-    const payout = +(hiLoRound.wager * 8).toFixed(2);
-    awardGamePayout(payout, 'High Low Cards');
-    prompt.textContent = `Perfect run. Paid ${fmt$(payout)}.`;
-    prompt.className = 'game-result win';
+    const multiplier = cardPayoutMultiplier(hiLoRound.correct);
+    const payout = +(hiLoRound.wager * multiplier).toFixed(2);
+    awardGamePayout(payout, 'Cards');
+    prompt.textContent = cardResultText(hiLoRound.correct, payout);
+    prompt.className = `game-result ${multiplier > 1 ? 'win' : multiplier === 0 ? 'loss' : ''}`;
     actions.innerHTML = '';
     hiLoRound = null;
     return;
@@ -2047,11 +2039,11 @@ function drawHiLoRound() {
 
   const prompts = [
     ['First card color?', ['red', 'black']],
-    ['Second card: higher or lower than the first?', ['higher', 'lower']],
-    ['Third card: higher, lower, or between the first two?', ['higher', 'lower', 'between']],
+    ['Second card: higher, lower, or same as the first?', ['higher', 'lower', 'same']],
+    ['Third card: higher, lower, same, or between the first two?', ['higher', 'lower', 'same', 'between']],
     ['Final card suit?', ['hearts', 'diamonds', 'clubs', 'spades']]
   ];
-  prompt.textContent = prompts[hiLoRound.step][0];
+  prompt.textContent = `${prompts[hiLoRound.step][0]} Correct so far: ${hiLoRound.correct}/${hiLoRound.step}.`;
   prompt.className = 'game-result';
   actions.innerHTML = prompts[hiLoRound.step][1].map(choice =>
     `<button class="btn btn-ghost card-choice" data-choice="${choice}">${choiceLabel(choice)}</button>`
@@ -2085,18 +2077,39 @@ function guessHiLo(choice) {
   if (hiLoRound.step === 0) {
     correct = choice === ((c[0].suit === 'hearts' || c[0].suit === 'diamonds') ? 'red' : 'black');
   } else if (hiLoRound.step === 1) {
-    correct = choice === (c[1].value > c[0].value ? 'higher' : 'lower') && c[1].value !== c[0].value;
+    const actual = c[1].value > c[0].value ? 'higher' : c[1].value < c[0].value ? 'lower' : 'same';
+    correct = choice === actual;
   } else if (hiLoRound.step === 2) {
     const low = Math.min(c[0].value, c[1].value);
     const high = Math.max(c[0].value, c[1].value);
-    const actual = c[2].value > high ? 'higher' : c[2].value < low ? 'lower' : 'between';
+    const actual = c[2].value === c[0].value || c[2].value === c[1].value
+      ? 'same'
+      : c[2].value > high
+        ? 'higher'
+        : c[2].value < low
+          ? 'lower'
+          : 'between';
     correct = choice === actual;
   } else {
     correct = choice === c[3].suit;
   }
-  hiLoRound.lost = !correct;
-  if (correct) hiLoRound.step += 1;
+  if (correct) hiLoRound.correct += 1;
+  hiLoRound.step += 1;
   drawHiLoRound();
+}
+
+function cardPayoutMultiplier(correct) {
+  if (correct >= 4) return 8;
+  if (correct === 3) return 2.5;
+  if (correct === 2) return 1;
+  return 0;
+}
+
+function cardResultText(correct, payout) {
+  if (correct >= 4) return `4 correct. Huge hit, paid ${fmt$(payout)}.`;
+  if (correct === 3) return `3 correct. Nice run, paid ${fmt$(payout)}.`;
+  if (correct === 2) return `2 correct. Push, your wager is returned.`;
+  return `${correct} correct. No payout this round.`;
 }
 
 function renderRunnerGame(content) {
