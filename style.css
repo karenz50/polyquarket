@@ -1988,14 +1988,14 @@ select option { background: var(--surface2); }
   /* Market grid: single column */
   .market-grid { grid-template-columns: 1fr; }
 
-  /* Modal: sheet from bottom */
+  /* Modal: anchored near tapped market */
   #market-modal {
-    padding: 0;
-    align-items: flex-end;
+    padding: 0 12px 12px;
+    align-items: flex-start;
   }
   #modal-content {
     max-width: 100%;
-    border-radius: 20px 20px 0 0;
+    border-radius: 20px;
     padding: 20px 18px 28px;
     max-height: 92dvh;
     overflow-y: auto;

@@ -116,7 +116,7 @@ let marketSearch = '';
 let marketCategoryFilter = 'all';
 let activeExploreTab = 'trending';
 let exploreChartFilter = 'all';
-let activeGamesTab = 'plinko';
+let activeGamesTab = 'runner';
 let hiLoRound = null;
 let dinoState = {
   running: false,
@@ -928,7 +928,7 @@ function applyMarketFilters() {
   `;
 
   container.querySelectorAll('.market-card').forEach(card => {
-    card.addEventListener('click', () => openModal(card.dataset.id));
+    card.addEventListener('click', () => openModal(card.dataset.id, card));
   });
 }
 
@@ -1013,7 +1013,7 @@ function renderPortfolio() {
     </div>
   `;
   document.querySelectorAll('.pos-card').forEach(card => {
-    card.addEventListener('click', () => openModal(card.dataset.id));
+    card.addEventListener('click', () => openModal(card.dataset.id, card));
   });
 }
 
@@ -1622,7 +1622,7 @@ function renderExploreTab() {
   `;
 
   content.querySelectorAll('.explore-market-row').forEach(row => {
-    row.addEventListener('click', () => openModal(row.dataset.id));
+    row.addEventListener('click', () => openModal(row.dataset.id, row));
   });
   content.querySelectorAll('.chart-filter-btn').forEach(btn => {
     btn.addEventListener('click', () => { exploreChartFilter = btn.dataset.filter; renderExploreTab(); });
@@ -1788,9 +1788,9 @@ function renderGames() {
         <p class="hero-sub">Fast mini games with instant balance updates</p>
       </div>
       <div class="explore-tabs">
+        <button class="explore-tab ${activeGamesTab === 'runner' ? 'active' : ''}" data-gtab="runner">Quark Run</button>
         <button class="explore-tab ${activeGamesTab === 'plinko' ? 'active' : ''}" data-gtab="plinko">Luck</button>
         <button class="explore-tab ${activeGamesTab === 'cards' ? 'active' : ''}" data-gtab="cards">Cards</button>
-        <button class="explore-tab ${activeGamesTab === 'runner' ? 'active' : ''}" data-gtab="runner">Quark Run</button>
       </div>
       <div id="games-content"></div>
     </div>
@@ -2384,7 +2384,7 @@ function drawQuarkRunnerSprite(ctx, x, y, size) {
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────
-function openModal(marketId) {
+function openModal(marketId, triggerEl = null) {
   const m = appData.markets.find(x => x.id === marketId);
   if (!m) return;
 
@@ -2398,7 +2398,8 @@ function openModal(marketId) {
   const vol  = m.yesPool + m.noPool;
   const hasPos = h.yes > 0 || h.no > 0;
 
-  document.getElementById('modal-content').innerHTML = `
+  const modalContent = document.getElementById('modal-content');
+  modalContent.innerHTML = `
     <div class="modal-head">
       <span class="cat-badge" style="color:${CAT_COLORS[m.category]||'#6b7280'};background:${CAT_COLORS[m.category]||'#6b7280'}22">${esc(m.category)}</span>
       <button class="modal-close-btn" onclick="closeModal()">×</button>
@@ -2495,13 +2496,34 @@ function openModal(marketId) {
     ` : ''}
   `;
 
+  positionMarketModal(triggerEl);
   document.getElementById('market-modal').classList.add('open');
 }
 
 function closeModal() {
   document.getElementById('market-modal').classList.remove('open');
+  resetMarketModalPosition();
   selectedMarketId  = null;
   selectedTradeSide = 'yes';
+}
+
+function positionMarketModal(triggerEl) {
+  const content = document.getElementById('modal-content');
+  if (!content) return;
+  resetMarketModalPosition();
+  if (!triggerEl || !window.matchMedia('(max-width: 640px)').matches) return;
+
+  const rect = triggerEl.getBoundingClientRect();
+  const top = Math.max(10, Math.min(window.innerHeight - 260, rect.bottom + 8));
+  content.style.marginTop = top + 'px';
+  content.style.maxHeight = `calc(100dvh - ${top + 12}px)`;
+}
+
+function resetMarketModalPosition() {
+  const content = document.getElementById('modal-content');
+  if (!content) return;
+  content.style.marginTop = '';
+  content.style.maxHeight = '';
 }
 
 function selectSide(side) {
