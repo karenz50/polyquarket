@@ -1891,6 +1891,7 @@ select option { background: var(--surface2); }
 .runner-mobile-jump {
   display: none;
   margin-top: 12px;
+  touch-action: manipulation;
 }
 
 .runner-leaderboard {

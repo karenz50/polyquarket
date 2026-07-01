@@ -2223,7 +2223,11 @@ function renderRunnerGame(content) {
   `;
   drawRunnerScene();
   document.getElementById('runner-start-btn').addEventListener('click', startDinoGame);
-  document.getElementById('runner-mobile-jump-btn').addEventListener('click', jumpDino);
+  const mobileJumpBtn = document.getElementById('runner-mobile-jump-btn');
+  mobileJumpBtn.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    jumpDino(true);
+  });
 }
 
 function startDinoGame() {
@@ -2257,9 +2261,9 @@ function stopDinoGame() {
   dinoState.running = false;
 }
 
-function jumpDino() {
+function jumpDino(isTouch = false) {
   if (!dinoState.running || dinoState.playerY > 2) return;
-  dinoState.velocity = 10.4;
+  dinoState.velocity = isTouch ? 13.2 : 10.8;
 }
 
 function tickDinoGame(ts) {
@@ -2334,11 +2338,21 @@ function runnerMultiplier(score) {
 
 function spawnRunnerObstacles() {
   const density = Math.min(1, dinoState.score / 130);
-  const makeObstacle = x => ({
-    x,
-    w: 22 + Math.random() * (18 + density * 10),
-    h: 34 + Math.random() * (36 + density * 18)
-  });
+  const variants = [
+    { type: 'short-wide', w: 46, h: 42 },
+    { type: 'short-thin', w: 24, h: 42 },
+    { type: 'tall-wide',  w: 44, h: 72 },
+    { type: 'tall-thin',  w: 26, h: 72 }
+  ];
+  const makeObstacle = x => {
+    const variant = variants[Math.floor(Math.random() * variants.length)];
+    return {
+      x,
+      type: variant.type,
+      w: variant.w + Math.random() * (density * 8),
+      h: variant.h + Math.random() * (density * 6)
+    };
+  };
 
   dinoState.obstacles.push(makeObstacle(780));
   if (dinoState.score > 45 && Math.random() < density * 0.5) {
@@ -2367,11 +2381,53 @@ function drawRunnerScene() {
   ctx.lineTo(canvas.width, 233);
   ctx.stroke();
   drawQuarkRunnerSprite(ctx, 76, 188 - dinoState.playerY, 42);
-  ctx.fillStyle = '#22c55e';
-  for (const o of dinoState.obstacles) ctx.fillRect(o.x, 232 - o.h, o.w, o.h);
+  for (const o of dinoState.obstacles) drawScientistObstacle(ctx, o);
   ctx.fillStyle = '#e8eaf6';
   ctx.font = '700 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
   ctx.fillText(`Score ${Math.floor(dinoState.score)}`, 18, 30);
+}
+
+function drawScientistObstacle(ctx, o) {
+  const ground = 232;
+  const x = o.x;
+  const y = ground - o.h;
+  const center = x + o.w / 2;
+  const headR = Math.max(5, Math.min(9, o.w * 0.22));
+  const headY = y + headR + 2;
+  const bodyTop = headY + headR + 3;
+  const bodyBottom = ground - 12;
+  const armY = bodyTop + (bodyBottom - bodyTop) * 0.34;
+  const legY = bodyBottom;
+
+  ctx.save();
+  ctx.lineWidth = o.type.includes('wide') ? 4 : 2.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#f8fafc';
+  ctx.fillStyle = '#f8fafc';
+
+  ctx.beginPath();
+  ctx.arc(center, headY, headR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(center, bodyTop);
+  ctx.lineTo(center, bodyBottom);
+  ctx.moveTo(center - o.w * 0.38, armY);
+  ctx.lineTo(center + o.w * 0.38, armY + (o.type.includes('short') ? 2 : -4));
+  ctx.moveTo(center, legY);
+  ctx.lineTo(center - o.w * 0.34, ground);
+  ctx.moveTo(center, legY);
+  ctx.lineTo(center + o.w * 0.34, ground);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(center - headR * 0.9, headY - headR * 0.12);
+  ctx.lineTo(center + headR * 0.9, headY - headR * 0.12);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawQuarkRunnerSprite(ctx, x, y, size) {
@@ -2387,6 +2443,9 @@ function drawQuarkRunnerSprite(ctx, x, y, size) {
 function openModal(marketId, triggerEl = null) {
   const m = appData.markets.find(x => x.id === marketId);
   if (!m) return;
+  const restoreScrollY = triggerEl && window.matchMedia('(max-width: 640px)').matches
+    ? window.scrollY
+    : null;
 
   selectedMarketId  = marketId;
   selectedTradeSide = 'yes';
@@ -2497,7 +2556,12 @@ function openModal(marketId, triggerEl = null) {
   `;
 
   positionMarketModal(triggerEl);
-  document.getElementById('market-modal').classList.add('open');
+  const modal = document.getElementById('market-modal');
+  modal.scrollTop = 0;
+  modal.classList.add('open');
+  if (restoreScrollY !== null) {
+    requestAnimationFrame(() => window.scrollTo({ top: restoreScrollY, left: 0, behavior: 'auto' }));
+  }
 }
 
 function closeModal() {
@@ -2508,19 +2572,25 @@ function closeModal() {
 }
 
 function positionMarketModal(triggerEl) {
+  const modal = document.getElementById('market-modal');
   const content = document.getElementById('modal-content');
-  if (!content) return;
+  if (!modal || !content) return;
   resetMarketModalPosition();
   if (!triggerEl || !window.matchMedia('(max-width: 640px)').matches) return;
 
   const rect = triggerEl.getBoundingClientRect();
   const top = Math.max(10, Math.min(window.innerHeight - 260, rect.bottom + 8));
-  content.style.marginTop = top + 'px';
+  modal.style.paddingTop = top + 'px';
   content.style.maxHeight = `calc(100dvh - ${top + 12}px)`;
 }
 
 function resetMarketModalPosition() {
+  const modal = document.getElementById('market-modal');
   const content = document.getElementById('modal-content');
+  if (modal) {
+    modal.style.paddingTop = '';
+    modal.scrollTop = 0;
+  }
   if (!content) return;
   content.style.marginTop = '';
   content.style.maxHeight = '';
