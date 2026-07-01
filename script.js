@@ -2124,10 +2124,10 @@ function cardPayoutMultiplier(correct) {
 }
 
 function cardResultText(correct, payout) {
-  if (correct >= 4) return `4 correct. Huge hit, paid ${fmt$(payout)}.`;
+  if (correct >= 4) return `4 correct. Great work, paid ${fmt$(payout)}.`;
   if (correct === 3) return `3 correct. Nice run, paid ${fmt$(payout)}.`;
-  if (correct === 2) return `2 correct. Push, your wager is returned.`;
-  return `${correct} correct. No payout this round.`;
+  if (correct === 2) return `2 correct. Your wager is returned.`;
+  return `${correct} correct. No payout this round. Better luck next time.`;
 }
 
 function getRunnerHighScore(username) {
@@ -2190,7 +2190,7 @@ function renderRunnerGame(content) {
           <div class="game-panel-head">
             <div>
               <h3>Quark Run</h3>
-              <p>You are a runaway particle escaping pesky scientists. Run as far as you can and jump with Space to stay free.</p>
+              <p>You are a runaway particle escaping pesky scientists. Run as far as you can and jump with Space (desktop) or the button (mobile) to stay free.</p>
             </div>
             <span class="game-chip">Score pays up to 6x</span>
           </div>
@@ -2263,7 +2263,8 @@ function stopDinoGame() {
 
 function jumpDino(isTouch = false) {
   if (!dinoState.running || dinoState.playerY > 2) return;
-  dinoState.velocity = isTouch ? 13.2 : 10.8;
+  dinoState.velocity = isTouch ? 18.2 : 10.8;
+  if (isTouch) dinoState.playerY = 4;
 }
 
 function tickDinoGame(ts) {
@@ -2421,12 +2422,6 @@ function drawScientistObstacle(ctx, o) {
   ctx.lineTo(center + o.w * 0.34, ground);
   ctx.stroke();
 
-  ctx.strokeStyle = '#38bdf8';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(center - headR * 0.9, headY - headR * 0.12);
-  ctx.lineTo(center + headR * 0.9, headY - headR * 0.12);
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -2443,9 +2438,8 @@ function drawQuarkRunnerSprite(ctx, x, y, size) {
 function openModal(marketId, triggerEl = null) {
   const m = appData.markets.find(x => x.id === marketId);
   if (!m) return;
-  const restoreScrollY = triggerEl && window.matchMedia('(max-width: 640px)').matches
-    ? window.scrollY
-    : null;
+  const isMobileAnchored = triggerEl && window.matchMedia('(max-width: 640px)').matches;
+  const restoreScrollY = isMobileAnchored ? window.scrollY : null;
 
   selectedMarketId  = marketId;
   selectedTradeSide = 'yes';
@@ -2579,8 +2573,12 @@ function positionMarketModal(triggerEl) {
   if (!triggerEl || !window.matchMedia('(max-width: 640px)').matches) return;
 
   const rect = triggerEl.getBoundingClientRect();
-  const top = Math.max(10, Math.min(window.innerHeight - 260, rect.bottom + 8));
-  modal.style.paddingTop = top + 'px';
+  const top = Math.max(10, Math.min(window.innerHeight * 0.42, rect.bottom + 8));
+  content.style.position = 'fixed';
+  content.style.left = '12px';
+  content.style.right = '12px';
+  content.style.top = top + 'px';
+  content.style.width = 'auto';
   content.style.maxHeight = `calc(100dvh - ${top + 12}px)`;
 }
 
@@ -2593,6 +2591,11 @@ function resetMarketModalPosition() {
   }
   if (!content) return;
   content.style.marginTop = '';
+  content.style.position = '';
+  content.style.left = '';
+  content.style.right = '';
+  content.style.top = '';
+  content.style.width = '';
   content.style.maxHeight = '';
 }
 

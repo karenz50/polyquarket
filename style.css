@@ -1892,6 +1892,9 @@ select option { background: var(--surface2); }
   display: none;
   margin-top: 12px;
   touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .runner-leaderboard {
