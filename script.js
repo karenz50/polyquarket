@@ -1844,6 +1844,19 @@ function awardGamePayout(amount, gameName) {
   refreshHeader();
 }
 
+function chargeGameLoss(amount, gameName) {
+  const ud = userData();
+  if (!ud || amount <= 0) return 0;
+  const charged = Math.min(amount, ud.balance);
+  ud.balance = +((ud.balance - charged).toFixed(2));
+  if (!ud.history) ud.history = [];
+  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance, note: gameName });
+  syncCurrentUser();
+  saveData();
+  refreshHeader();
+  return charged;
+}
+
 function renderPlinkoGame(content) {
   content.innerHTML = `
     <div class="game-layout">
@@ -1881,9 +1894,9 @@ function renderPlinkoGame(content) {
         <div id="plinko-result" class="game-result">Ready to drop.</div>
       </div>
       <div class="game-side">
-        <div class="game-side-stat"><span>Low risk</span><strong>0.5x - 2.0x</strong></div>
-        <div class="game-side-stat"><span>Medium risk</span><strong>0.2x - 5.0x</strong></div>
-        <div class="game-side-stat"><span>High risk</span><strong>0x - 12.0x</strong></div>
+        <div class="game-side-stat"><span>Low risk</span><strong>0.5x - 1.5x</strong></div>
+        <div class="game-side-stat"><span>Medium risk</span><strong>0x - 2x</strong></div>
+        <div class="game-side-stat"><span>High risk</span><strong>-2x - 5x</strong></div>
       </div>
     </div>
   `;
@@ -1897,10 +1910,18 @@ function renderPlinkoGame(content) {
 
 function plinkoMultipliers(risk) {
   return {
-    low: [0.5, 0.8, 1, 1.2, 2],
-    medium: [0.2, 0.6, 1, 1.8, 5],
-    high: [0, 0.3, 1, 3, 12]
-  }[risk] || [0.2, 0.6, 1, 1.8, 5];
+    low: [0.5, 0.75, 1, 1.25, 1.5],
+    medium: [0, 0.5, 1, 1.5, 2],
+    high: [-2, -1, 0, 2, 5]
+  }[risk] || [0, 0.5, 0.8, 1, 2];
+}
+
+function plinkoWeights(risk) {
+  return {
+    low: [30, 30, 16, 14, 10],
+    medium: [30, 30, 16, 14, 10],
+    high: [20, 20, 20, 26, 14]
+  }[risk] || [30, 30, 16, 14, 10];
 }
 
 function plinkoPegHTML() {
@@ -1932,8 +1953,7 @@ function playPlinko() {
   }
 
   const multipliers = plinkoMultipliers(risk);
-  const weights = risk === 'high' ? [22, 28, 25, 18, 7] : risk === 'low' ? [12, 24, 30, 24, 10] : [16, 26, 28, 22, 8];
-  const bucket = weightedIndex(weights);
+  const bucket = weightedIndex(plinkoWeights(risk));
   const mult = multipliers[bucket];
   const payout = +(res.amount * mult).toFixed(2);
 
@@ -1950,9 +1970,15 @@ function playPlinko() {
   });
 
   setTimeout(() => {
-    awardGamePayout(payout, 'Luck');
-    resultEl.textContent = `${mult}x multiplier. ${payout > 0 ? `Paid ${fmt$(payout)}.` : 'No payout this drop.'}`;
-    resultEl.className = `game-result ${payout > res.amount ? 'win' : 'loss'}`;
+    if (mult < 0) {
+      const extraLoss = chargeGameLoss(Math.max(0, (Math.abs(mult) - 1) * res.amount), 'Luck');
+      resultEl.textContent = `${mult}x multiplier. ${extraLoss > 0 ? `Lost an extra ${fmt$(extraLoss)}.` : 'No payout this drop.'}`;
+      resultEl.className = 'game-result loss';
+    } else {
+      awardGamePayout(payout, 'Luck');
+      resultEl.textContent = `${mult}x multiplier. ${payout > 0 ? `Paid ${fmt$(payout)}.` : 'No payout this drop.'}`;
+      resultEl.className = `game-result ${payout > res.amount ? 'win' : payout < res.amount ? 'loss' : ''}`;
+    }
     btn.disabled = false;
   }, 850);
 }
@@ -1976,7 +2002,7 @@ function renderCardGame(content) {
             <h3>Cards</h3>
             <p>Make four calls, then get paid from your final score.</p>
           </div>
-          <span class="game-chip">2 = push · 3 = 2.5x · 4 = 8x</span>
+          <span class="game-chip">2 = net zero · 3 = 2.5x · 4 = 8x</span>
         </div>
         <div class="game-controls">
           <div class="field">
@@ -2213,7 +2239,7 @@ function renderRunnerGame(content) {
         </div>
         <div class="game-side">
           <div class="game-side-stat"><span>Space</span><strong>Jump</strong></div>
-          <div class="game-side-stat"><span>60 score</span><strong>1.5x</strong></div>
+          <div class="game-side-stat"><span>80 score</span><strong>1.5x</strong></div>
           <div class="game-side-stat"><span>120 score</span><strong>3x</strong></div>
           <div class="game-side-stat"><span>180 score</span><strong>6x cap</strong></div>
         </div>
@@ -2334,7 +2360,8 @@ function runnerSpeed() {
 function runnerMultiplier(score) {
   if (score >= 180) return 6;
   if (score >= 120) return 3 + ((score - 120) / 60) * 3;
-  return Math.max(0, score / 40);
+  if (score >= 80) return 1.5 + ((score - 80) / 40) * 1.5;
+  return Math.max(0, score / 80 * 1.5);
 }
 
 function spawnRunnerObstacles() {
