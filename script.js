@@ -1820,6 +1820,7 @@ function saveRunnerHighScore(score) {
 
 function runnerLeaderboardHTML() {
   const top = Object.entries(appData.runnerScores || {})
+    .filter(([name]) => appData.users?.[name] && appData.users[name].role !== 'admin')
     .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0))
     .slice(0, 5);
 
