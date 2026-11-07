@@ -7,16 +7,16 @@ const db = firebase.database();
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SESSION_KEY = 'polyquarket_session_v3';
-const CURRENT_DATA_VERSION = 4;
+const CURRENT_DATA_VERSION = 5;
+const STARTING_BALANCE = 1250;
 
 
 const DEFAULT_DATA = {
   meta: { dataVersion: CURRENT_DATA_VERSION },
   users: {
-    karen:     { password: '1234', role: 'user',  balance: 670, chattedWith: {} },
-    elizabeth: { password: 'goat', role: 'admin', balance: 670, chattedWith: {} }
+    karen:     { password: '1234', role: 'user',  balance: STARTING_BALANCE },
+    elizabeth: { password: 'goat', role: 'admin', balance: STARTING_BALANCE }
   },
-  chats: {},
   runnerScores: {},
   markets: [
     {
@@ -136,8 +136,6 @@ quarkRunnerLogo.src = 'logo.png';
 quarkRunnerLogo.onload = () => {
   if (activeView === 'games' && activeGamesTab === 'runner') drawRunnerScene();
 };
-let selectedChatUser = null;
-let chatUserSearch = '';
 let networkAnimationFrame = null;
 
 // ── Storage ────────────────────────────────────────────────────────────────
@@ -151,52 +149,8 @@ function deepCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-function ensureChatDataShape() {
-  if (!appData.chats) appData.chats = {};
-  if (!appData.users) appData.users = {};
-  for (const ud of Object.values(appData.users)) {
-    if (!ud.chattedWith) ud.chattedWith = {};
-  }
-}
-
 function ensureGameDataShape() {
   if (!appData.runnerScores) appData.runnerScores = {};
-}
-
-function chatHasMessages(chat) {
-  return Array.isArray(chat?.messages) && chat.messages.length > 0;
-}
-
-function unreadMessagesInChat(chat) {
-  if (!currentUser || !chatHasMessages(chat)) return 0;
-  const readAt = new Date(chat.readAt?.[currentUser.username] || 0).getTime();
-  return chat.messages.filter(msg =>
-    msg.from !== currentUser.username && new Date(msg.ts).getTime() > readAt
-  ).length;
-}
-
-function totalUnreadChatMessages() {
-  return chatsForCurrentUser().reduce((sum, chat) => sum + unreadMessagesInChat(chat), 0);
-}
-
-function pruneEmptyChats() {
-  if (!appData.chats) return false;
-  let changed = false;
-  for (const [id, chat] of Object.entries(appData.chats)) {
-    if (!chatHasMessages(chat)) {
-      const participants = Array.isArray(chat?.participants) ? chat.participants : [];
-      for (const username of participants) {
-        const user = appData.users?.[username];
-        if (!user?.chattedWith) continue;
-        for (const other of participants) {
-          if (other !== username) delete user.chattedWith[other];
-        }
-      }
-      delete appData.chats[id];
-      changed = true;
-    }
-  }
-  return changed;
 }
 
 function applyMigrations(fromVersion) {
@@ -219,11 +173,19 @@ function applyMigrations(fromVersion) {
       }
     }
   }
-  if (fromVersion < 3) {
-    ensureChatDataShape();
-  }
   if (fromVersion < 4) {
     ensureGameDataShape();
+  }
+  if (fromVersion < 5) {
+    // Reset everyone to an equal starting balance and remove chat data.
+    const now = new Date().toISOString();
+    for (const ud of Object.values(appData.users)) {
+      ud.balance = STARTING_BALANCE;
+      if (!Array.isArray(ud.history)) ud.history = [];
+      ud.history.push({ ts: now, bal: STARTING_BALANCE, note: 'Balance reset' });
+      delete ud.chattedWith;
+    }
+    delete appData.chats;
   }
   if (!appData.meta) appData.meta = {};
   appData.meta.dataVersion = CURRENT_DATA_VERSION;
@@ -240,16 +202,11 @@ function startRealtimeListener() {
         appData = data;
         if (!appData.users)        appData.users        = deepCopy(DEFAULT_DATA.users);
         if (!appData.markets)      appData.markets      = deepCopy(DEFAULT_DATA.markets);
-        if (!appData.chats)        appData.chats        = {};
         if (!appData.runnerScores) appData.runnerScores = {};
         if (!appData.meta)         appData.meta         = { dataVersion: 0 };
-        ensureChatDataShape();
         ensureGameDataShape();
-        const prunedEmptyChats = pruneEmptyChats();
         if (!appData.notifyEmails) {
           appData.notifyEmails = ['efield@uchicago.edu'];
-          saveData();
-        } else if (prunedEmptyChats) {
           saveData();
         }
 
@@ -272,9 +229,7 @@ function startRealtimeListener() {
     // Remote update from another client
     if (!data) return;
     appData = data;
-    ensureChatDataShape();
     ensureGameDataShape();
-    if (pruneEmptyChats()) saveData();
     syncCurrentUser();
     if (currentUser) {
       switch (activeView) {
@@ -284,7 +239,6 @@ function startRealtimeListener() {
           if (activeGamesTab === 'runner' && !dinoState.running) renderRunnerLeaderboard();
           break;
         case 'portfolio': renderPortfolio(); break;
-        case 'chat':      renderChat();      break;
         case 'admin':     renderAdmin();     break;
       }
       refreshHeader();
@@ -363,7 +317,7 @@ function register(email, username, password, confirmPassword) {
     }
   }
 
-  appData.users[username] = { email, password, role: 'user', balance: 670, chattedWith: {}, history: [{ ts: new Date().toISOString(), bal: 670 }] };
+  appData.users[username] = { email, password, role: 'user', balance: STARTING_BALANCE, history: [{ ts: new Date().toISOString(), bal: STARTING_BALANCE }] };
   saveData();
   return { success: true };
 }
@@ -403,124 +357,6 @@ function userData() {
 
 function syncCurrentUser() {
   if (currentUser) currentUser = { username: currentUser.username, ...appData.users[currentUser.username] };
-}
-
-function chatIdFor(a, b) {
-  return [a, b].sort().join('__');
-}
-
-function canStartChatWith(username) {
-  if (!currentUser || username === currentUser.username) return false;
-  const target = appData.users[username];
-  if (!target) return false;
-  return currentUser.role === 'admin' || target.role !== 'admin';
-}
-
-function normalizeChatRecord(chat, username) {
-  if (!chat) return null;
-  if (!Array.isArray(chat.participants)) {
-    chat.participants = [currentUser.username, username].sort();
-  }
-  if (!Array.isArray(chat.messages)) {
-    chat.messages = [];
-  }
-  if (!chat.createdAt) {
-    chat.createdAt = new Date().toISOString();
-  }
-  if (!chat.updatedAt) {
-    chat.updatedAt = chat.createdAt;
-  }
-  if (!chat.readAt) {
-    chat.readAt = {};
-  }
-  return chat;
-}
-
-function getChatWith(username) {
-  if (!currentUser || !appData.chats) return null;
-  const id = chatIdFor(currentUser.username, username);
-  const chat = normalizeChatRecord(appData.chats[id], username);
-  return chatHasMessages(chat) ? chat : null;
-}
-
-function ensureChat(username) {
-  const ud = userData();
-  if (!ud) return { success: false, error: 'Not logged in.' };
-  if (!appData.users[username]) return { success: false, error: 'User not found.' };
-  if (username === currentUser.username) return { success: false, error: 'Choose another user.' };
-  if (!canStartChatWith(username)) return { success: false, error: 'Admins cannot receive new messages.' };
-
-  if (!appData.chats) appData.chats = {};
-  if (!ud.chattedWith) ud.chattedWith = {};
-  if (!appData.users[username].chattedWith) appData.users[username].chattedWith = {};
-
-  const id = chatIdFor(currentUser.username, username);
-  if (!appData.chats[id]) {
-    appData.chats[id] = {
-      id,
-      participants: [currentUser.username, username].sort(),
-      messages: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      readAt: {}
-    };
-  }
-  normalizeChatRecord(appData.chats[id], username);
-
-  ud.chattedWith[username] = true;
-  appData.users[username].chattedWith[currentUser.username] = true;
-  return { success: true, chat: appData.chats[id] };
-}
-
-function sendChatMessage(toUsername, rawText) {
-  const text = rawText.trim();
-  if (!text) return { success: false, error: 'Enter a message.' };
-  if (text.length > 1000) return { success: false, error: 'Messages must be 1000 characters or fewer.' };
-
-  const res = ensureChat(toUsername);
-  if (!res.success) return res;
-
-  const now = new Date().toISOString();
-  res.chat.messages.push({
-    id: 'msg' + Date.now(),
-    from: currentUser.username,
-    text,
-    ts: now
-  });
-  res.chat.updatedAt = now;
-  if (!res.chat.readAt) res.chat.readAt = {};
-  res.chat.readAt[currentUser.username] = now;
-  syncCurrentUser();
-  saveData();
-  return { success: true };
-}
-
-function markChatRead(username) {
-  const chat = getChatWith(username);
-  if (!chat) return false;
-  const incoming = chat.messages
-    .filter(msg => msg.from !== currentUser.username)
-    .sort((a, b) => new Date(b.ts) - new Date(a.ts));
-  if (!incoming.length) return false;
-
-  const latestIncomingTs = incoming[0].ts;
-  const currentReadTs = chat.readAt?.[currentUser.username];
-  if (currentReadTs && new Date(currentReadTs).getTime() >= new Date(latestIncomingTs).getTime()) {
-    return false;
-  }
-
-  if (!chat.readAt) chat.readAt = {};
-  chat.readAt[currentUser.username] = latestIncomingTs;
-  saveData();
-  return true;
-}
-
-function chatsForCurrentUser() {
-  if (!currentUser) return [];
-  const chats = Object.values(appData.chats || {}).filter(chat =>
-    chatHasMessages(chat) && (chat.participants || []).includes(currentUser.username)
-  );
-  return chats.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
 }
 
 // ── Market Actions ─────────────────────────────────────────────────────────
@@ -643,7 +479,7 @@ function deleteMarket(marketId) {
 
 // ── View Management ────────────────────────────────────────────────────────
 function showView(view) {
-  if ((view === 'admin' || view === 'portfolio' || view === 'markets' || view === 'explore' || view === 'games' || view === 'chat') && !currentUser) {
+  if ((view === 'admin' || view === 'portfolio' || view === 'markets' || view === 'explore' || view === 'games') && !currentUser) {
     view = 'login';
   }
   if (activeView === 'games' && view !== 'games') stopDinoGame();
@@ -674,7 +510,6 @@ function showView(view) {
     if (avatarEl) avatarEl.textContent = currentUser.username[0].toUpperCase();
     const adminLink = document.getElementById('nav-admin');
     if (adminLink) adminLink.style.display = currentUser.role === 'admin' ? '' : 'none';
-    refreshChatBadges();
   }
 
   switch (view) {
@@ -683,7 +518,6 @@ function showView(view) {
     case 'explore':   renderExplore();   break;
     case 'games':     renderGames();     break;
     case 'portfolio': renderPortfolio(); break;
-    case 'chat':      renderChat();      break;
     case 'admin':     renderAdmin();     break;
   }
 }
@@ -692,15 +526,6 @@ function refreshHeader() {
   if (!currentUser) return;
   const ud = userData();
   if (ud) document.getElementById('header-balance').textContent = fmt$(ud.balance);
-  refreshChatBadges();
-}
-
-function refreshChatBadges() {
-  const badge = document.getElementById('chat-nav-badge');
-  if (!badge || !currentUser) return;
-  const unread = totalUnreadChatMessages();
-  badge.textContent = unread > 99 ? '99+' : unread;
-  badge.style.display = unread > 0 ? '' : 'none';
 }
 
 // ── Render: Login ──────────────────────────────────────────────────────────
@@ -1056,185 +881,6 @@ function positionCard({ market: m, h }) {
       </div>
     </div>
   `;
-}
-
-// ── Render: Chat ───────────────────────────────────────────────────────────
-function renderChat() {
-  const users = Object.keys(appData.users || {}).filter(canStartChatWith).sort();
-  const chats = chatsForCurrentUser();
-  if (!selectedChatUser && chats.length) {
-    selectedChatUser = (chats[0].participants || []).find(name => name !== currentUser.username) || null;
-  }
-  if (selectedChatUser && !appData.users[selectedChatUser]) selectedChatUser = null;
-  if (selectedChatUser) markChatRead(selectedChatUser);
-  refreshChatBadges();
-
-  document.getElementById('view-chat').innerHTML = `
-    <div class="page-inner chat-page-inner">
-      <div class="page-hero">
-        <h2 class="hero-title">Chat</h2>
-        <p class="hero-sub">Message other Polyquarket users</p>
-      </div>
-
-      <div class="chat-layout">
-        <aside class="chat-sidebar">
-          <div class="chat-list-wrap">
-            <h3 class="section-head">Existing Chats</h3>
-            <div class="chat-list">
-              ${chats.length ? chats.map(chatListRow).join('') : '<p class="hint-txt chat-empty-mini">No chats yet.</p>'}
-            </div>
-          </div>
-
-          <div class="chat-new">
-            <label for="chat-user-search">Start a chat</label>
-            <input id="chat-user-search" type="text" placeholder="Search users…" value="${esc(chatUserSearch)}">
-            <div class="chat-user-results"></div>
-          </div>
-        </aside>
-
-        <section class="chat-panel">
-          ${selectedChatUser ? chatConversationHTML(selectedChatUser) : `
-            <div class="chat-no-selection">
-              <p>Select a user to start messaging.</p>
-            </div>
-          `}
-        </section>
-      </div>
-    </div>
-  `;
-
-  document.getElementById('chat-user-search')?.addEventListener('input', e => {
-    chatUserSearch = e.target.value;
-    renderChatUserResults(users);
-  });
-
-  renderChatUserResults(users);
-  bindChatPickers('.chat-list-row');
-
-  document.getElementById('chat-form')?.addEventListener('submit', e => {
-    e.preventDefault();
-    const input = document.getElementById('chat-message-input');
-    const errEl = document.getElementById('chat-err');
-    errEl.style.display = 'none';
-    const res = sendChatMessage(selectedChatUser, input.value);
-    if (res.success) {
-      input.value = '';
-      renderChat();
-    } else {
-      errEl.textContent = res.error;
-      errEl.style.display = 'block';
-    }
-  });
-
-  const messageList = document.getElementById('chat-messages');
-  if (messageList) messageList.scrollTop = messageList.scrollHeight;
-}
-
-function renderChatUserResults(users) {
-  const container = document.querySelector('.chat-user-results');
-  if (!container) return;
-  const filteredUsers = users.filter(name => name.toLowerCase().includes(chatUserSearch.toLowerCase()));
-  container.innerHTML = filteredUsers.length
-    ? filteredUsers.map(chatUserRow).join('')
-    : '<p class="hint-txt chat-empty-mini">No users found.</p>';
-  bindChatPickers('.chat-user-row');
-}
-
-function bindChatPickers(selector) {
-  document.querySelectorAll(selector).forEach(row => {
-    row.addEventListener('click', () => {
-      selectedChatUser = row.dataset.username;
-      renderChat();
-    });
-  });
-}
-
-function chatUserRow(name) {
-  const isActive = selectedChatUser === name;
-  return `
-    <button class="chat-user-row ${isActive ? 'active' : ''}" data-username="${esc(name)}" type="button">
-      <span class="chat-avatar">${esc(name[0].toUpperCase())}</span>
-      <span>${esc(name)}</span>
-    </button>
-  `;
-}
-
-function chatListRow(chat) {
-  const other = (chat.participants || []).find(name => name !== currentUser.username);
-  if (!other) return '';
-  const messages = chat.messages || [];
-  const last = messages[messages.length - 1];
-  const preview = last ? last.text : 'No messages yet.';
-  const isActive = selectedChatUser === other;
-  const unread = unreadMessagesInChat(chat);
-  return `
-    <button class="chat-list-row ${isActive ? 'active' : ''} ${unread ? 'unread' : ''}" data-username="${esc(other)}" type="button">
-      <span class="chat-avatar">${esc(other[0].toUpperCase())}</span>
-      <span class="chat-list-info">
-        <span class="chat-list-name">${esc(other)}</span>
-        <span class="chat-list-preview">${esc(preview)}</span>
-      </span>
-      ${unread ? `<span class="chat-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
-      ${last ? `<span class="chat-list-time">${formatChatTime(last.ts)}</span>` : ''}
-    </button>
-  `;
-}
-
-function chatConversationHTML(username) {
-  const existingChat = getChatWith(username);
-  const chat = existingChat;
-  const messages = chat?.messages || [];
-  const canSend = canStartChatWith(username);
-  return `
-    <div class="chat-panel-head">
-      <span class="chat-avatar large">${esc(username[0].toUpperCase())}</span>
-      <div>
-        <h3>${esc(username)}</h3>
-        <p>${messages.length} message${messages.length === 1 ? '' : 's'}</p>
-      </div>
-    </div>
-
-    <div id="chat-messages" class="chat-messages">
-      ${messages.length ? messages.map(chatMessageBubble).join('') : `
-        <div class="chat-no-messages">
-          <p>No messages yet.</p>
-        </div>
-      `}
-    </div>
-
-    ${canSend ? `
-      <form id="chat-form" class="chat-compose">
-        <div id="chat-err" class="err-msg" style="display:none"></div>
-        <div class="chat-compose-row">
-          <textarea id="chat-message-input" rows="2" maxlength="1000" placeholder="Write a message…"></textarea>
-          <button class="btn btn-primary" type="submit">Send</button>
-        </div>
-      </form>
-    ` : `
-      <div class="chat-compose chat-compose-locked">
-        <p class="hint-txt chat-empty-mini">Admins can message you here, but replies are disabled.</p>
-      </div>
-    `}
-  `;
-}
-
-function chatMessageBubble(message) {
-  const mine = message.from === currentUser.username;
-  return `
-    <div class="chat-message ${mine ? 'mine' : 'theirs'}">
-      <div class="chat-bubble">
-        <p>${esc(message.text)}</p>
-        <span>${esc(formatChatTime(message.ts))}</span>
-      </div>
-    </div>
-  `;
-}
-
-function formatChatTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 // ── Render: Admin ──────────────────────────────────────────────────────────
