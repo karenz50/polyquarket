@@ -706,6 +706,7 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
   transition: all .15s;
 }
 
+.side-btn:disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
 .side-btn.yes { border-color: transparent; }
 .side-btn.no  { border-color: transparent; }
 
@@ -722,6 +723,33 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
 
 .sb-pct { font-size: 20px; font-weight: 900; letter-spacing: -.5px; }
 .sb-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+
+/* Buy / Sell segmented toggle (only shown when the user holds a position) */
+.trade-mode-btns {
+  display: flex;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  padding: 3px;
+  gap: 3px;
+}
+.trade-mode-btn {
+  flex: 1;
+  padding: 7px 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text2);
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.trade-mode-btn.active { background: var(--surface3); color: var(--text); }
+.trade-note { font-size: 12px; color: var(--text3); line-height: 1.5; }
+
+.pos-sell-btn { align-self: flex-start; margin-top: 4px; }
 
 .amount-wrap { display: flex; flex-direction: column; gap: 8px; }
 .amount-wrap label { font-size: 12px; color: var(--text2); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
@@ -1683,6 +1711,18 @@ select option { background: var(--surface2); }
   border: none;
   border-radius: 0;
 }
+
+/* Full leaderboard pop-up */
+.lb-modal-sub { margin: -8px 0 0; }
+.lb-modal-list {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.lb-modal-list .explore-user-row.is-you { background: rgba(99,102,241,.1); }
+
+.btn-sm { padding: 5px 12px; font-size: 12px; }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar       { width: 6px; }

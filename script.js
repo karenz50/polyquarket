@@ -109,6 +109,7 @@ let currentUser = null;
 let activeView = 'login';
 let selectedMarketId = null;
 let selectedTradeSide = 'yes';
+let selectedTradeMode = 'buy'; // 'buy' | 'sell' — sell is only offered when the user holds a position
 let activeAdminTab = 'markets';
 let selectedAdjUser = null;
 let loginMode = 'signin';
@@ -417,6 +418,49 @@ async function buyShares(marketId, side, rawAmount) {
     if (!ud.holdings[marketId]) ud.holdings[marketId] = { yes: 0, no: 0 };
     ud.holdings[marketId][side] = +(((ud.holdings[marketId][side] || 0) + spend).toFixed(2));
     return { success: true };
+  });
+}
+
+// Exit fee charged when selling; it stays in the pool, like the starting seed money.
+const SELL_FEE = 0.05;
+
+function sellRefund(amount) {
+  return +(amount * (1 - SELL_FEE)).toFixed(2);
+}
+
+// In this pool-based market a position's expected value at the current odds is
+// always exactly its stake (payout-if-win × win probability = stake), so selling
+// refunds the stake minus the fee. Paying out "payout if win" would be free money.
+async function sellShares(marketId, side, rawAmount) {
+  const amount = parseFloat(rawAmount);
+  if (!amount || amount <= 0) return { success: false, error: 'Enter a valid amount.' };
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const username = currentUser.username;
+
+  return commit(d => {
+    const ud = d.users[username];
+    if (!ud) return { success: false, error: 'Not logged in.' };
+    const market = d.markets.find(m => m.id === marketId);
+    if (!market || market.status !== 'open') return { success: false, error: 'Market is not open.' };
+    const h = (ud.holdings || {})[marketId];
+    const held = h?.[side] || 0;
+    if (held <= 0) return { success: false, error: `You don't hold any ${side.toUpperCase()}.` };
+    if (amount > held + 0.001) return { success: false, error: `You only hold ${fmt$(held)} of ${side.toUpperCase()}.` };
+
+    const sold   = Math.min(amount, held);
+    const refund = sellRefund(sold);
+    const poolKey = side === 'yes' ? 'yesPool' : 'noPool';
+    market[poolKey] = Math.max(0, +((market[poolKey] - refund).toFixed(2)));
+    if (!market.history) market.history = [];
+    market.history.push({ ts: new Date().toISOString(), vol: +(market.yesPool + market.noPool).toFixed(2) });
+
+    h[side] = +((held - sold).toFixed(2));
+    if (h[side] < 0.01) h[side] = 0;
+    if (!(h.yes > 0) && !(h.no > 0)) delete ud.holdings[marketId];
+
+    ud.balance = +((ud.balance + refund).toFixed(2));
+    pushHistory(ud, { bal: ud.balance, note: 'Sell' });
+    return { success: true, sold, refund };
   });
 }
 
@@ -915,6 +959,12 @@ function renderPortfolio() {
   document.querySelectorAll('.pos-card').forEach(card => {
     card.addEventListener('click', () => openModal(card.dataset.id, card));
   });
+  document.querySelectorAll('.pos-sell-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      openModal(btn.dataset.id, btn.closest('.pos-card'), { mode: 'sell', side: btn.dataset.side });
+    });
+  });
 }
 
 function positionCard({ market: m, h }) {
@@ -937,22 +987,28 @@ function positionCard({ market: m, h }) {
           <div class="pos-side yes">
             <span class="side-name">YES <em>${fmtPct(yp)}</em></span>
             <span>Invested ${fmt$(h.yes)}</span>
-            <span>Value ${fmt$(yv)}</span>
+            <span>Pays ${fmt$(yv)} if YES wins</span>
             <span class="pnl ${yv >= h.yes ? 'pos' : 'neg'}">${yv >= h.yes?'+':''}${fmt$(yv - h.yes)}</span>
+            ${m.status === 'open' ? `
+              <button class="btn btn-ghost btn-sm pos-sell-btn" data-id="${m.id}" data-side="yes">Sell · ${fmt$(sellRefund(h.yes))}</button>
+            ` : ''}
           </div>
         ` : ''}
         ${h.no > 0 ? `
           <div class="pos-side no">
             <span class="side-name">NO <em>${fmtPct(np)}</em></span>
             <span>Invested ${fmt$(h.no)}</span>
-            <span>Value ${fmt$(nv)}</span>
+            <span>Pays ${fmt$(nv)} if NO wins</span>
             <span class="pnl ${nv >= h.no ? 'pos' : 'neg'}">${nv >= h.no?'+':''}${fmt$(nv - h.no)}</span>
+            ${m.status === 'open' ? `
+              <button class="btn btn-ghost btn-sm pos-sell-btn" data-id="${m.id}" data-side="no">Sell · ${fmt$(sellRefund(h.no))}</button>
+            ` : ''}
           </div>
         ` : ''}
       </div>
       <div class="pos-foot">
         <span>Total invested: ${fmt$(invested)}</span>
-        <span class="${current >= invested ? 'pnl pos' : 'pnl neg'}">Current est. value: ${fmt$(current)}</span>
+        <span class="${current >= invested ? 'pnl pos' : 'pnl neg'}">Max payout: ${fmt$(current)}</span>
       </div>
     </div>
   `;
@@ -2019,17 +2075,23 @@ function saveRunnerHighScore(score) {
   });
 }
 
-function runnerLeaderboardHTML() {
-  const top = Object.entries(appData.runnerScores || {})
+function runnerRankings() {
+  return Object.entries(appData.runnerScores || {})
     .filter(([name]) => appData.users?.[name] && appData.users[name].role !== 'admin')
-    .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0))
-    .slice(0, 5);
+    .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0));
+}
+
+function runnerLeaderboardHTML() {
+  const all = runnerRankings();
+  const top = all.slice(0, 5);
 
   return `
     <div class="runner-leaderboard">
       <div class="runner-leaderboard-head">
         <h3>Quark Run Leaderboard</h3>
-        <span>Top scores</span>
+        ${all.length > 0
+          ? `<button class="btn btn-ghost btn-sm" onclick="openRunnerLeaderboardModal(this)">View all (${all.length})</button>`
+          : '<span>Top scores</span>'}
       </div>
       <div class="explore-panel-list runner-leaderboard-list">
         ${top.length ? top.map(([name, entry], i) => runnerLeaderboardRow(name, entry, i + 1)).join('') : '<p class="hint-txt" style="padding:16px">No runner scores yet.</p>'}
@@ -2054,6 +2116,30 @@ function runnerLeaderboardRow(name, entry, rank) {
 function renderRunnerLeaderboard() {
   const el = document.getElementById('runner-leaderboard');
   if (el) el.innerHTML = runnerLeaderboardHTML();
+}
+
+// Full leaderboard in the shared pop-up; the list scrolls inside it.
+function openRunnerLeaderboardModal(triggerEl = null) {
+  const all = runnerRankings();
+  const myIdx = currentUser ? all.findIndex(([name]) => name === currentUser.username) : -1;
+  selectedMarketId = null;
+  document.getElementById('modal-content').innerHTML = `
+    <div class="modal-head">
+      <h2 class="modal-title">Quark Run — All Scores</h2>
+      <button class="modal-close-btn" onclick="closeModal()">×</button>
+    </div>
+    <p class="hint-txt lb-modal-sub">${all.length} player${all.length === 1 ? '' : 's'}${myIdx >= 0 ? ` · You're #${myIdx + 1}` : ''}</p>
+    <div class="explore-panel-list lb-modal-list">
+      ${all.length
+        ? all.map(([name, entry], i) => runnerLeaderboardRow(name, entry, i + 1)).join('')
+        : '<p class="hint-txt" style="padding:16px">No runner scores yet.</p>'}
+    </div>
+  `;
+  positionMarketModal(triggerEl);
+  const modal = document.getElementById('market-modal');
+  modal.scrollTop = 0;
+  modal.classList.add('open');
+  document.querySelector('.lb-modal-list .is-you')?.scrollIntoView({ block: 'center' });
 }
 
 function renderRunnerGame(content) {
@@ -2334,14 +2420,16 @@ function drawQuarkRunnerSprite(ctx, x, y, size) {
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────
-function openModal(marketId, triggerEl = null) {
+// opts: { mode: 'buy'|'sell', side: 'yes'|'no', keepPosition: bool }
+function openModal(marketId, triggerEl = null, opts = {}) {
   const m = appData.markets.find(x => x.id === marketId);
   if (!m) return;
   const isMobileAnchored = triggerEl && window.matchMedia('(max-width: 640px)').matches;
   const restoreScrollY = isMobileAnchored ? window.scrollY : null;
 
   selectedMarketId  = marketId;
-  selectedTradeSide = 'yes';
+  selectedTradeMode = opts.mode || 'buy';
+  selectedTradeSide = opts.side || 'yes';
 
   const yp   = yesPrice(m);
   const np   = noPrice(m);
@@ -2395,48 +2483,7 @@ function openModal(marketId, triggerEl = null) {
         <span>Resolved <strong>${m.winner?.toUpperCase()}</strong></span>
       </div>
     ` : `
-      <div class="trade-panel">
-        <div class="trade-header">
-          <span class="trade-title">Place Trade</span>
-          <span class="trade-bal">Balance: <strong>${fmt$(ud.balance)}</strong></span>
-        </div>
-
-        <div class="side-btns">
-          <button id="side-yes" class="side-btn active yes" onclick="selectSide('yes')">
-            <span class="sb-pct">${fmtPct(yp)}</span>
-            <span class="sb-lbl">Buy YES</span>
-          </button>
-          <button id="side-no" class="side-btn no" onclick="selectSide('no')">
-            <span class="sb-pct">${fmtPct(np)}</span>
-            <span class="sb-lbl">Buy NO</span>
-          </button>
-        </div>
-
-        <div class="amount-wrap">
-          <label>Amount</label>
-          <div class="amount-row">
-            <span class="amount-prefix">$</span>
-            <input id="trade-amt" type="number" placeholder="0.00" min="0.01" step="0.01" max="${ud.balance}" oninput="updateEstimate()">
-            <button class="btn btn-ghost max-btn" onclick="setAmt(${ud.balance})">MAX</button>
-          </div>
-          <div class="quick-btns">
-            ${[5, 10, 20, 50].filter(v => v <= ud.balance + 0.001).map(v =>
-              `<button class="quick-btn" onclick="setAmt(${Math.min(v, ud.balance).toFixed(2)})">${fmt$(v)}</button>`
-            ).join('')}
-          </div>
-        </div>
-
-        <div id="estimate-row" class="estimate-row" style="display:none">
-          <span>Estimated payout if correct:</span>
-          <span id="estimate-val" class="estimate-val"></span>
-        </div>
-
-        <div id="trade-err" class="err-msg" style="display:none"></div>
-
-        <button id="trade-btn" class="btn btn-yes btn-large w-full" onclick="executeTrade()">
-          Buy YES
-        </button>
-      </div>
+      <div id="trade-panel-wrap"></div>
     `}
 
     ${currentUser?.role === 'admin' ? `
@@ -2451,9 +2498,12 @@ function openModal(marketId, triggerEl = null) {
     ` : ''}
   `;
 
-  positionMarketModal(triggerEl);
+  renderTradePanel();
   const modal = document.getElementById('market-modal');
-  modal.scrollTop = 0;
+  if (!opts.keepPosition) {
+    positionMarketModal(triggerEl);
+    modal.scrollTop = 0;
+  }
   modal.classList.add('open');
   if (restoreScrollY !== null) {
     requestAnimationFrame(() => window.scrollTo({ top: restoreScrollY, left: 0, behavior: 'auto' }));
@@ -2465,6 +2515,7 @@ function closeModal() {
   resetMarketModalPosition();
   selectedMarketId  = null;
   selectedTradeSide = 'yes';
+  selectedTradeMode = 'buy';
 }
 
 function positionMarketModal(triggerEl) {
@@ -2474,8 +2525,10 @@ function positionMarketModal(triggerEl) {
   resetMarketModalPosition();
   if (!triggerEl || !window.matchMedia('(max-width: 640px)').matches) return;
 
+  // Start near the tapped item but never lower than 12% down the screen,
+  // so the pop-up gets most of the viewport instead of the bottom half.
   const rect = triggerEl.getBoundingClientRect();
-  const top = Math.max(10, Math.min(window.innerHeight * 0.42, rect.bottom + 8));
+  const top = Math.max(12, Math.min(window.innerHeight * 0.12, rect.top));
   content.style.position = 'fixed';
   content.style.left = '12px';
   content.style.right = '12px';
@@ -2501,16 +2554,99 @@ function resetMarketModalPosition() {
   content.style.maxHeight = '';
 }
 
-function selectSide(side) {
-  selectedTradeSide = side;
-  document.getElementById('side-yes')?.classList.toggle('active', side === 'yes');
-  document.getElementById('side-no')?.classList.toggle('active', side === 'no');
-  const btn = document.getElementById('trade-btn');
-  if (btn) {
-    btn.textContent  = `Buy ${side.toUpperCase()}`;
-    btn.className    = `btn btn-${side} btn-large w-full`;
+// ── Trade panel (Buy / Sell) ──
+function renderTradePanel() {
+  const wrap = document.getElementById('trade-panel-wrap');
+  const m = appData.markets.find(x => x.id === selectedMarketId);
+  if (!wrap || !m) return;
+  const ud = userData();
+  const h  = getUserHolding(m.id);
+  const held = { yes: h.yes || 0, no: h.no || 0 };
+  const hasPos = held.yes > 0 || held.no > 0;
+
+  // Fall back to buying if there's nothing to sell on the chosen side.
+  if (!hasPos) selectedTradeMode = 'buy';
+  if (selectedTradeMode === 'sell' && !(held[selectedTradeSide] > 0)) {
+    selectedTradeSide = held.yes > 0 ? 'yes' : 'no';
   }
-  updateEstimate();
+  const selling = selectedTradeMode === 'sell';
+  const side    = selectedTradeSide;
+  const yp = yesPrice(m), np = noPrice(m);
+  const maxAmt = selling ? held[side] : ud.balance;
+
+  const sideBtn = s => {
+    const pct = fmtPct(s === 'yes' ? yp : np);
+    const disabled = selling && !(held[s] > 0);
+    const sub = selling ? (held[s] > 0 ? `${fmt$(held[s])} held` : 'None held') : `Buy ${s.toUpperCase()}`;
+    return `
+      <button id="side-${s}" class="side-btn ${s} ${side === s ? 'active' : ''}" ${disabled ? 'disabled' : ''} onclick="selectSide('${s}')">
+        <span class="sb-pct">${selling ? s.toUpperCase() : pct}</span>
+        <span class="sb-lbl">${sub}</span>
+      </button>`;
+  };
+
+  const quick = selling
+    ? [[0.25, '25%'], [0.5, '50%'], [1, 'All']].map(([f, lbl]) =>
+        `<button class="quick-btn" onclick="setAmt(${(maxAmt * f).toFixed(2)})">${lbl}</button>`).join('')
+    : [5, 10, 20, 50].filter(v => v <= ud.balance + 0.001).map(v =>
+        `<button class="quick-btn" onclick="setAmt(${v.toFixed(2)})">${fmt$(v)}</button>`).join('');
+
+  wrap.innerHTML = `
+    <div class="trade-panel">
+      <div class="trade-header">
+        <span class="trade-title">${selling ? 'Sell Position' : 'Place Trade'}</span>
+        <span class="trade-bal">Balance: <strong>${fmt$(ud.balance)}</strong></span>
+      </div>
+
+      ${hasPos ? `
+        <div class="trade-mode-btns" role="tablist">
+          <button class="trade-mode-btn ${!selling ? 'active' : ''}" onclick="selectTradeMode('buy')">Buy</button>
+          <button class="trade-mode-btn ${selling ? 'active' : ''}" onclick="selectTradeMode('sell')">Sell</button>
+        </div>
+      ` : ''}
+
+      <div class="side-btns">${sideBtn('yes')}${sideBtn('no')}</div>
+
+      <div class="amount-wrap">
+        <label>${selling ? `Amount to sell (of ${fmt$(held[side])} ${side.toUpperCase()})` : 'Amount'}</label>
+        <div class="amount-row">
+          <span class="amount-prefix">$</span>
+          <input id="trade-amt" type="number" placeholder="0.00" min="0.01" step="0.01" max="${maxAmt}" oninput="updateEstimate()">
+          <button class="btn btn-ghost max-btn" onclick="setAmt(${maxAmt})">MAX</button>
+        </div>
+        <div class="quick-btns">${quick}</div>
+      </div>
+
+      ${selling ? `
+        <p class="trade-note">Selling returns the amount you staked minus a ${Math.round(SELL_FEE * 100)}% exit fee.
+          To bet against ${side.toUpperCase()}, buy ${side === 'yes' ? 'NO' : 'YES'} instead.</p>
+      ` : ''}
+
+      <div id="estimate-row" class="estimate-row" style="display:none">
+        <span>${selling ? "You'll receive:" : 'Estimated payout if correct:'}</span>
+        <span id="estimate-val" class="estimate-val"></span>
+      </div>
+
+      <div id="trade-err" class="err-msg" style="display:none"></div>
+
+      <button id="trade-btn" class="btn btn-${side} btn-large w-full" onclick="executeTrade()">
+        ${selling ? 'Sell' : 'Buy'} ${side.toUpperCase()}
+      </button>
+    </div>
+  `;
+}
+
+function selectTradeMode(mode) {
+  selectedTradeMode = mode;
+  renderTradePanel();
+}
+
+function selectSide(side) {
+  if (side === selectedTradeSide) return;
+  const keep = selectedTradeMode === 'buy' ? document.getElementById('trade-amt')?.value : '';
+  selectedTradeSide = side;
+  renderTradePanel();
+  if (keep) setAmt(keep);
 }
 
 function setAmt(amount) {
@@ -2525,6 +2661,15 @@ function updateEstimate() {
   const row    = document.getElementById('estimate-row');
   if (!row) return;
   if (amount <= 0) { row.style.display = 'none'; return; }
+
+  if (selectedTradeMode === 'sell') {
+    const held = getUserHolding(m.id)[selectedTradeSide] || 0;
+    const refund = sellRefund(Math.min(amount, held));
+    document.getElementById('estimate-val').textContent =
+      `${fmt$(refund)}${amount > held + 0.001 ? ` (you only hold ${fmt$(held)})` : ''}`;
+    row.style.display = 'flex';
+    return;
+  }
 
   const pool      = selectedTradeSide === 'yes' ? m.yesPool : m.noPool;
   const otherPool = selectedTradeSide === 'yes' ? m.noPool  : m.yesPool;
@@ -2544,14 +2689,19 @@ async function executeTrade() {
   const amount   = document.getElementById('trade-amt')?.value;
   const marketId = selectedMarketId;
   const side     = selectedTradeSide;
+  const mode     = selectedTradeMode;
   btn.disabled = true;
-  const res = await buyShares(marketId, side, amount);
+  const res = mode === 'sell'
+    ? await sellShares(marketId, side, amount)
+    : await buyShares(marketId, side, amount);
   btn.disabled = false;
   refreshHeader();
 
   if (res.success) {
-    showToast(`Bought ${side.toUpperCase()} position!`, 'success');
-    if (selectedMarketId === marketId) openModal(marketId);
+    showToast(mode === 'sell'
+      ? `Sold ${fmt$(res.sold)} of ${side.toUpperCase()} for ${fmt$(res.refund)}`
+      : `Bought ${side.toUpperCase()} position!`, 'success');
+    if (selectedMarketId === marketId) openModal(marketId, null, { mode, side, keepPosition: true });
   } else {
     const errEl = document.getElementById('trade-err');
     if (!errEl) return;
