@@ -2174,7 +2174,7 @@ function renderRunnerGame(content) {
         <div class="game-side">
           <div class="game-side-stat"><span>Space</span><strong>Jump</strong></div>
           <div class="game-side-stat"><span>100 score</span><strong>0.4x</strong></div>
-          <div class="game-side-stat"><span>200 score</span><strong>1x (break even)</strong></div>
+          <div class="game-side-stat"><span>150 score</span><strong>1x (break even)</strong></div>
           <div class="game-side-stat"><span>300 score</span><strong>1.75x</strong></div>
           <div class="game-side-stat"><span>500 score</span><strong>3x cap</strong></div>
         </div>
@@ -2312,13 +2312,13 @@ function runnerSpeed() {
   return 0.34 + Math.min(0.56, dinoState.score / 220);
 }
 
-// Break-even is at 200 (~31s of play). Most players crash between 80 and 160,
-// which returns 0.3x–0.76x, so the game loses money for most runs.
+// Break-even is at 150 (~23s of play). Most players crash between 80 and 150,
+// so the typical run loses money and only the best runs profit.
 function runnerMultiplier(score) {
   if (score >= 500) return 3;
   if (score >= 300) return 1.75 + ((score - 300) / 200) * 1.25;
-  if (score >= 200) return 1 + ((score - 200) / 100) * 0.75;
-  if (score >= 100) return 0.4 + ((score - 100) / 100) * 0.6;
+  if (score >= 150) return 1 + ((score - 150) / 150) * 0.75;
+  if (score >= 100) return 0.4 + ((score - 100) / 50) * 0.6;
   return Math.max(0, score / 100 * 0.4);
 }
 
