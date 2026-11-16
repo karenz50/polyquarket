@@ -141,55 +141,81 @@ let networkAnimationFrame = null;
 // ── Storage ────────────────────────────────────────────────────────────────
 let _dbInitialized = false;
 
-function saveData() {
-  db.ref('appData').set(appData);
-}
-
 function deepCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-function ensureGameDataShape() {
-  if (!appData.runnerScores) appData.runnerScores = {};
+// Firebase drops empty objects/arrays, so fill in the containers the app expects.
+function normalizeData(d) {
+  if (!d.users)        d.users        = {};
+  if (!d.markets)      d.markets      = [];
+  if (!Array.isArray(d.markets)) d.markets = Object.values(d.markets);
+  if (!d.runnerScores) d.runnerScores = {};
+  if (!d.meta)         d.meta         = { dataVersion: 0 };
+  return d;
 }
 
-function applyMigrations(fromVersion) {
+function ensureGameDataShape() {
+  normalizeData(appData);
+}
+
+// Every write goes through here. `mutator(data)` edits the LATEST server copy of
+// appData and returns { success, ... }; returning success:false aborts the write.
+// Firebase reruns the mutator if another client wrote in the meantime, so two
+// people acting at once can never overwrite each other's changes.
+function commit(mutator) {
+  return new Promise(resolve => {
+    let result = { success: false, error: 'Could not save. Please try again.' };
+    db.ref('appData').transaction(current => {
+      if (current === null) return null; // cache not loaded yet; Firebase retries with server data
+      normalizeData(current);
+      result = mutator(current) || { success: true };
+      return result.success ? current : undefined;
+    }, err => {
+      if (err) resolve({ success: false, error: 'Network error. Your change was not saved.' });
+      else resolve(result);
+    });
+  });
+}
+
+function pushHistory(ud, entry) {
+  if (!Array.isArray(ud.history)) ud.history = ud.history ? Object.values(ud.history) : [];
+  ud.history.push({ ts: new Date().toISOString(), ...entry });
+}
+
+function applyMigrations(d) {
+  const fromVersion = d.meta.dataVersion || 0;
+  if (fromVersion >= CURRENT_DATA_VERSION) return { success: false };
   if (fromVersion < 1) {
-    for (const ud of Object.values(appData.users)) {
+    for (const ud of Object.values(d.users)) {
       ud.balance = 670;
     }
   }
   if (fromVersion < 2) {
     const now = new Date().toISOString();
-    for (const market of appData.markets) {
+    for (const market of d.markets) {
       if (!market.history) {
         const startTs = market.createdAt ? market.createdAt + 'T00:00:00.000Z' : now;
         market.history = [{ ts: startTs, vol: +(market.yesPool + market.noPool).toFixed(2) }];
       }
     }
-    for (const ud of Object.values(appData.users)) {
+    for (const ud of Object.values(d.users)) {
       if (!ud.history) {
         ud.history = [{ ts: now, bal: ud.balance }];
       }
     }
   }
-  if (fromVersion < 4) {
-    ensureGameDataShape();
-  }
   if (fromVersion < 5) {
     // Reset everyone to an equal starting balance and remove chat data.
-    const now = new Date().toISOString();
-    for (const ud of Object.values(appData.users)) {
+    for (const ud of Object.values(d.users)) {
       ud.balance = STARTING_BALANCE;
-      if (!Array.isArray(ud.history)) ud.history = [];
-      ud.history.push({ ts: now, bal: STARTING_BALANCE, note: 'Balance reset' });
+      pushHistory(ud, { bal: STARTING_BALANCE, note: 'Balance reset' });
       delete ud.chattedWith;
     }
-    delete appData.chats;
+    delete d.chats;
   }
-  if (!appData.meta) appData.meta = {};
-  appData.meta.dataVersion = CURRENT_DATA_VERSION;
-  saveData();
+  d.meta.dataVersion = CURRENT_DATA_VERSION;
+  return { success: true };
 }
 
 function startRealtimeListener() {
@@ -199,24 +225,20 @@ function startRealtimeListener() {
     if (!_dbInitialized) {
       _dbInitialized = true;
       if (data) {
-        appData = data;
-        if (!appData.users)        appData.users        = deepCopy(DEFAULT_DATA.users);
-        if (!appData.markets)      appData.markets      = deepCopy(DEFAULT_DATA.markets);
-        if (!appData.runnerScores) appData.runnerScores = {};
-        if (!appData.meta)         appData.meta         = { dataVersion: 0 };
-        ensureGameDataShape();
+        appData = normalizeData(data);
         if (!appData.notifyEmails) {
-          appData.notifyEmails = ['efield@uchicago.edu'];
-          saveData();
+          commit(d => {
+            if (d.notifyEmails) return { success: false };
+            d.notifyEmails = ['efield@uchicago.edu'];
+            return { success: true };
+          });
         }
-
-        const storedVersion = appData.meta.dataVersion || 0;
-        if (storedVersion < CURRENT_DATA_VERSION) {
-          applyMigrations(storedVersion);
+        if ((appData.meta.dataVersion || 0) < CURRENT_DATA_VERSION) {
+          commit(applyMigrations);
         }
       } else {
         appData = deepCopy(DEFAULT_DATA);
-        saveData();
+        db.ref('appData').transaction(cur => cur === null ? deepCopy(DEFAULT_DATA) : undefined);
       }
       if (loadSession()) {
         showView('markets');
@@ -226,20 +248,19 @@ function startRealtimeListener() {
       return;
     }
 
-    // Remote update from another client
+    // Update from this or another client
     if (!data) return;
-    appData = data;
-    ensureGameDataShape();
+    appData = normalizeData(data);
     syncCurrentUser();
     if (currentUser) {
       switch (activeView) {
-        case 'markets':   renderMarkets();   break;
-        case 'explore':   renderExplore();   break;
+        case 'markets':   refreshMarketsLive(); break;
+        case 'explore':   renderExplore();      break;
         case 'games':
           if (activeGamesTab === 'runner' && !dinoState.running) renderRunnerLeaderboard();
           break;
-        case 'portfolio': renderPortfolio(); break;
-        case 'admin':     renderAdmin();     break;
+        case 'portfolio': renderPortfolio();    break;
+        case 'admin':     refreshAdminLive();   break;
       }
       refreshHeader();
     }
@@ -280,6 +301,8 @@ function login(username, password) {
 }
 
 function logout() {
+  finishOrStopDinoGame(); // settle any in-progress run before the user is cleared
+  hiLoRound = null;
   currentUser = null;
   loginMode = 'signin';
   marketSearch = '';
@@ -308,25 +331,25 @@ function register(email, username, password, confirmPassword) {
   if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
     return { success: false, error: 'Username may only contain letters, numbers, _ and -.' };
   }
-  if (appData.users[username]) {
-    return { success: false, error: 'That username is already taken.' };
-  }
-  for (const u of Object.values(appData.users)) {
-    if (u.email && u.email === email) {
-      return { success: false, error: 'An account with that email already exists.' };
+  return commit(d => {
+    if (d.users[username]) {
+      return { success: false, error: 'That username is already taken.' };
     }
-  }
-
-  appData.users[username] = { email, password, role: 'user', balance: STARTING_BALANCE, history: [{ ts: new Date().toISOString(), bal: STARTING_BALANCE }] };
-  saveData();
-  return { success: true };
+    for (const u of Object.values(d.users)) {
+      if (u.email && u.email === email) {
+        return { success: false, error: 'An account with that email already exists.' };
+      }
+    }
+    d.users[username] = { email, password, role: 'user', balance: STARTING_BALANCE, history: [{ ts: new Date().toISOString(), bal: STARTING_BALANCE }] };
+    return { success: true };
+  });
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────
 function esc(str) {
   const d = document.createElement('div');
   d.appendChild(document.createTextNode(String(str)));
-  return d.innerHTML;
+  return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function fmt$(n) {
@@ -359,122 +382,158 @@ function syncCurrentUser() {
   if (currentUser) currentUser = { username: currentUser.username, ...appData.users[currentUser.username] };
 }
 
+function marketHasPositions(d, marketId) {
+  return Object.values(d.users).some(ud => {
+    const h = (ud.holdings || {})[marketId];
+    return h && ((h.yes || 0) > 0 || (h.no || 0) > 0);
+  });
+}
+
 // ── Market Actions ─────────────────────────────────────────────────────────
-function buyShares(marketId, side, rawAmount) {
+async function buyShares(marketId, side, rawAmount) {
   const amount = parseFloat(rawAmount);
   if (!amount || amount <= 0) return { success: false, error: 'Enter a valid amount.' };
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
+  const username = currentUser.username;
 
-  const ud = userData();
-  if (!ud) return { success: false, error: 'Not logged in.' };
-  if (amount > ud.balance + 0.001) return { success: false, error: 'Insufficient balance.' };
+  return commit(d => {
+    const ud = d.users[username];
+    if (!ud) return { success: false, error: 'Not logged in.' };
+    if (amount > ud.balance + 0.001) return { success: false, error: 'Insufficient balance.' };
 
-  const market = appData.markets.find(m => m.id === marketId);
-  if (!market || market.status !== 'open') return { success: false, error: 'Market is not open.' };
+    const market = d.markets.find(m => m.id === marketId);
+    if (!market || market.status !== 'open') return { success: false, error: 'Market is not open.' };
 
-  const spend = Math.min(amount, ud.balance);
-  ud.balance = +((ud.balance - spend).toFixed(2));
-  if (!ud.history) ud.history = [];
-  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance });
+    const spend = Math.min(amount, ud.balance);
+    ud.balance = +((ud.balance - spend).toFixed(2));
+    pushHistory(ud, { bal: ud.balance });
 
-  if (side === 'yes') market.yesPool = +((market.yesPool + spend).toFixed(2));
-  else                market.noPool  = +((market.noPool  + spend).toFixed(2));
-  if (!market.history) market.history = [];
-  market.history.push({ ts: new Date().toISOString(), vol: +(market.yesPool + market.noPool).toFixed(2) });
+    if (side === 'yes') market.yesPool = +((market.yesPool + spend).toFixed(2));
+    else                market.noPool  = +((market.noPool  + spend).toFixed(2));
+    if (!market.history) market.history = [];
+    market.history.push({ ts: new Date().toISOString(), vol: +(market.yesPool + market.noPool).toFixed(2) });
 
-  if (!ud.holdings) ud.holdings = {};
-  if (!ud.holdings[marketId]) ud.holdings[marketId] = { yes: 0, no: 0 };
-  ud.holdings[marketId][side] = +((ud.holdings[marketId][side] + spend).toFixed(2));
-
-  syncCurrentUser();
-  saveData();
-  return { success: true };
+    if (!ud.holdings) ud.holdings = {};
+    if (!ud.holdings[marketId]) ud.holdings[marketId] = { yes: 0, no: 0 };
+    ud.holdings[marketId][side] = +(((ud.holdings[marketId][side] || 0) + spend).toFixed(2));
+    return { success: true };
+  });
 }
 
 function resolveMarket(marketId, winner) {
-  const market = appData.markets.find(m => m.id === marketId);
-  if (!market || market.status !== 'open') return { success: false, error: 'Cannot resolve.' };
+  return commit(d => {
+    const market = d.markets.find(m => m.id === marketId);
+    if (!market || market.status !== 'open') return { success: false, error: 'Cannot resolve.' };
 
-  market.status = 'resolved';
-  market.winner = winner;
+    market.status = 'resolved';
+    market.winner = winner;
 
-  const total       = market.yesPool + market.noPool;
-  const winningPool = winner === 'yes' ? market.yesPool : market.noPool;
+    const total       = market.yesPool + market.noPool;
+    const winningPool = winner === 'yes' ? market.yesPool : market.noPool;
 
-  const resolvedAt = new Date().toISOString();
-  for (const [, ud] of Object.entries(appData.users)) {
-    const h = (ud.holdings || {})[marketId];
-    if (!h) continue;
-    const bet = h[winner] || 0;
-    if (bet > 0 && winningPool > 0) {
-      ud.balance = +((ud.balance + (bet / winningPool) * total).toFixed(2));
-      if (!ud.history) ud.history = [];
-      ud.history.push({ ts: resolvedAt, bal: ud.balance });
+    for (const ud of Object.values(d.users)) {
+      const h = (ud.holdings || {})[marketId];
+      if (!h) continue;
+      const bet = h[winner] || 0;
+      if (bet > 0 && winningPool > 0) {
+        ud.balance = +((ud.balance + (bet / winningPool) * total).toFixed(2));
+        pushHistory(ud, { bal: ud.balance });
+      }
+      delete ud.holdings[marketId];
     }
-    delete ud.holdings[marketId];
-  }
-
-  syncCurrentUser();
-  saveData();
-  return { success: true };
+    return { success: true };
+  });
 }
 
 function adjustBalance(username, delta) {
-  const ud = appData.users[username];
-  if (!ud) return { success: false, error: 'User not found.' };
-  const newBalance = +((ud.balance + delta).toFixed(2));
-  if (newBalance < 0) return { success: false, error: 'Balance cannot go below $0.' };
-  ud.balance = newBalance;
-  if (!ud.history) ud.history = [];
-  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance });
-  syncCurrentUser();
-  saveData();
-  return { success: true };
+  return commit(d => {
+    const ud = d.users[username];
+    if (!ud) return { success: false, error: 'User not found.' };
+    const newBalance = +((ud.balance + delta).toFixed(2));
+    if (newBalance < 0) return { success: false, error: 'Balance cannot go below $0.' };
+    ud.balance = newBalance;
+    pushHistory(ud, { bal: ud.balance });
+    return { success: true };
+  });
+}
+
+function parsePool(raw, label) {
+  const v = raw !== '' && raw !== undefined ? parseFloat(raw) : 500;
+  if (isNaN(v) || v < 0) return { error: `${label} pool must be a non-negative number.` };
+  return { value: +v.toFixed(2) };
 }
 
 function addMarket(title, description, category, endsAt, yesPool, noPool) {
-  if (!title.trim()) return { success: false, error: 'Title is required.' };
-  const yp = yesPool !== '' && yesPool !== undefined ? parseFloat(yesPool) : 500;
-  const np = noPool  !== '' && noPool  !== undefined ? parseFloat(noPool)  : 500;
-  if (isNaN(yp) || yp < 0) return { success: false, error: 'YES pool must be a non-negative number.' };
-  if (isNaN(np) || np < 0) return { success: false, error: 'NO pool must be a non-negative number.' };
+  if (!title.trim()) return Promise.resolve({ success: false, error: 'Title is required.' });
+  const yp = parsePool(yesPool, 'YES');
+  const np = parsePool(noPool, 'NO');
+  if (yp.error || np.error) return Promise.resolve({ success: false, error: yp.error || np.error });
   const market = {
     id: 'm' + Date.now(),
     title: title.trim(),
     description: description.trim(),
     category: category || 'Random',
-    yesPool: +yp.toFixed(2), noPool: +np.toFixed(2),
+    yesPool: yp.value, noPool: np.value,
     status: 'open', winner: null,
     createdAt: new Date().toISOString().slice(0, 10),
     endsAt: endsAt || '',
-    history: [{ ts: new Date().toISOString(), vol: +(yp + np).toFixed(2) }]
+    history: [{ ts: new Date().toISOString(), vol: +(yp.value + np.value).toFixed(2) }]
   };
-  appData.markets.unshift(market);
-  saveData();
-  return { success: true };
+  return commit(d => {
+    d.markets.unshift(market);
+    return { success: true };
+  });
+}
+
+// Pools can only be changed while nobody holds a position, since changing them
+// after trades would alter everyone's payouts.
+function editMarket(marketId, { title, description, category, endsAt, yesPool, noPool }) {
+  if (!title.trim()) return Promise.resolve({ success: false, error: 'Title is required.' });
+  let yp = null, np = null;
+  if (yesPool !== undefined) {
+    yp = parsePool(yesPool, 'YES');
+    np = parsePool(noPool, 'NO');
+    if (yp.error || np.error) return Promise.resolve({ success: false, error: yp.error || np.error });
+  }
+  return commit(d => {
+    const market = d.markets.find(m => m.id === marketId);
+    if (!market) return { success: false, error: 'Market no longer exists.' };
+    market.title       = title.trim();
+    market.description = description.trim();
+    market.category    = category || 'Random';
+    market.endsAt      = endsAt || '';
+    if (yp && (yp.value !== market.yesPool || np.value !== market.noPool)) {
+      if (market.status !== 'open' || marketHasPositions(d, marketId)) {
+        return { success: false, error: 'Pools are locked because people have already traded on this market.' };
+      }
+      market.yesPool = yp.value;
+      market.noPool  = np.value;
+      market.history = [{ ts: new Date().toISOString(), vol: +(yp.value + np.value).toFixed(2) }];
+    }
+    return { success: true };
+  });
 }
 
 function deleteMarket(marketId) {
-  const idx = appData.markets.findIndex(m => m.id === marketId);
-  if (idx === -1) return { success: false, error: 'Not found.' };
+  return commit(d => {
+    const idx = d.markets.findIndex(m => m.id === marketId);
+    if (idx === -1) return { success: false, error: 'Not found.' };
 
-  const market = appData.markets[idx];
-  if (market.status === 'open') {
-    const deletedAt = new Date().toISOString();
-    for (const [, ud] of Object.entries(appData.users)) {
-      const h = (ud.holdings || {})[marketId];
-      if (h) {
-        ud.balance = +((ud.balance + (h.yes || 0) + (h.no || 0)).toFixed(2));
-        if (!ud.history) ud.history = [];
-        ud.history.push({ ts: deletedAt, bal: ud.balance });
-        delete ud.holdings[marketId];
+    const market = d.markets[idx];
+    if (market.status === 'open') {
+      for (const ud of Object.values(d.users)) {
+        const h = (ud.holdings || {})[marketId];
+        if (h) {
+          ud.balance = +((ud.balance + (h.yes || 0) + (h.no || 0)).toFixed(2));
+          pushHistory(ud, { bal: ud.balance });
+          delete ud.holdings[marketId];
+        }
       }
     }
-  }
 
-  appData.markets.splice(idx, 1);
-  syncCurrentUser();
-  saveData();
-  return { success: true };
+    d.markets.splice(idx, 1);
+    return { success: true };
+  });
 }
 
 // ── View Management ────────────────────────────────────────────────────────
@@ -482,7 +541,7 @@ function showView(view) {
   if ((view === 'admin' || view === 'portfolio' || view === 'markets' || view === 'explore' || view === 'games') && !currentUser) {
     view = 'login';
   }
-  if (activeView === 'games' && view !== 'games') stopDinoGame();
+  if (activeView === 'games' && view !== 'games') finishOrStopDinoGame();
   if (view === 'admin' && currentUser?.role !== 'admin') {
     view = 'markets';
   }
@@ -618,18 +677,21 @@ function renderLogin() {
   });
 
   // Form submit (not present in 'forgot' mode)
-  document.getElementById('auth-form')?.addEventListener('submit', e => {
+  document.getElementById('auth-form')?.addEventListener('submit', async e => {
     e.preventDefault();
     const errEl = document.getElementById('auth-err');
     errEl.style.display = 'none';
 
     if (mode === 'register') {
-      const res = register(
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      const res = await register(
         document.getElementById('inp-email').value,
         document.getElementById('inp-user').value,
         document.getElementById('inp-pass').value,
         document.getElementById('inp-pass2').value
       );
+      submitBtn.disabled = false;
       if (res.success) {
         login(document.getElementById('inp-user').value.trim(), document.getElementById('inp-pass').value);
         showView('markets');
@@ -653,11 +715,37 @@ function renderLogin() {
 }
 
 // ── Render: Markets ────────────────────────────────────────────────────────
-function renderMarkets() {
-  const allCategories = [...new Set(appData.markets.map(m => m.category))].sort();
+function marketStatsHTML() {
   const totalVol      = appData.markets.reduce((s, m) => s + m.yesPool + m.noPool, 0);
   const openCount     = appData.markets.filter(m => m.status === 'open').length;
   const resolvedCount = appData.markets.filter(m => m.status === 'resolved').length;
+  return `
+    <div class="stat-box">
+      <div class="stat-val">${openCount}</div>
+      <div class="stat-lbl">Open Markets</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val">${fmt$(totalVol)}</div>
+      <div class="stat-lbl">Total Volume</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val">${resolvedCount}</div>
+      <div class="stat-lbl">Resolved</div>
+    </div>
+  `;
+}
+
+// Live update: refresh stats and cards without rebuilding the search box,
+// so typing isn't interrupted when someone else trades.
+function refreshMarketsLive() {
+  const stats = document.getElementById('market-stats');
+  if (!stats) { renderMarkets(); return; }
+  stats.innerHTML = marketStatsHTML();
+  applyMarketFilters();
+}
+
+function renderMarkets() {
+  const allCategories = [...new Set(appData.markets.map(m => m.category))].sort();
 
   document.getElementById('view-markets').innerHTML = `
     <div class="page-inner">
@@ -666,20 +754,7 @@ function renderMarkets() {
         <p class="hero-sub">Trade on real-world outcomes</p>
       </div>
 
-      <div class="stat-row">
-        <div class="stat-box">
-          <div class="stat-val">${openCount}</div>
-          <div class="stat-lbl">Open Markets</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-val">${fmt$(totalVol)}</div>
-          <div class="stat-lbl">Total Volume</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-val">${resolvedCount}</div>
-          <div class="stat-lbl">Resolved</div>
-        </div>
-      </div>
+      <div class="stat-row" id="market-stats">${marketStatsHTML()}</div>
 
       <div class="market-controls">
         <div class="market-search-wrap">
@@ -884,6 +959,12 @@ function positionCard({ market: m, h }) {
 }
 
 // ── Render: Admin ──────────────────────────────────────────────────────────
+// The admin page is never fully re-rendered by live updates: only the market
+// list and the users table refresh, so the create/edit form, the user search
+// and an open balance-adjust panel survive other people's activity.
+let editingMarketId = null;
+const MARKET_CATEGORIES = ['Physics', 'Skits', 'Spherical Cow Awards', 'Random'];
+
 function renderAdmin() {
   if (currentUser?.role !== 'admin') { showView('markets'); return; }
 
@@ -896,65 +977,17 @@ function renderAdmin() {
 
       <div class="admin-tabs">
         <button class="admin-tab ${activeAdminTab === 'markets' ? 'active' : ''}" data-tab="markets">Markets</button>
-        <button class="admin-tab ${activeAdminTab === 'users' ? 'active' : ''}" data-tab="users">Users (${Object.keys(appData.users).length})</button>
+        <button class="admin-tab ${activeAdminTab === 'users' ? 'active' : ''}" data-tab="users">Users (<span id="admin-users-count">${Object.keys(appData.users).length}</span>)</button>
       </div>
 
       <!-- Markets Tab -->
       <div id="admin-tab-markets" class="admin-tab-panel ${activeAdminTab === 'markets' ? 'active' : ''}">
         <div class="admin-layout">
-          <div class="admin-form-wrap">
-            <h3 class="section-head">Create Market</h3>
-            <form id="add-form" class="admin-form">
-              <div class="field">
-                <label>Question *</label>
-                <input id="f-title" type="text" placeholder="Will X happen by Y?" maxlength="200">
-              </div>
-              <div class="field">
-                <label>Description / Resolution Criteria</label>
-                <textarea id="f-desc" rows="3" placeholder="How does this market resolve?"></textarea>
-              </div>
-              <div class="field">
-                <label>Category</label>
-                <select id="f-cat">
-                  <option>Physics</option>
-                  <option>Skits</option>
-                  <option>Spherical Cow Awards</option>
-                  <option>Random</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>End Date</label>
-                <input id="f-ends" type="date">
-              </div>
-              <div class="field">
-                <label class="pool-label-row">
-                  Starting Pools
-                  <span class="pool-hint">recommended total: $1000</span>
-                </label>
-                <div class="pool-inputs-row">
-                  <div class="pool-input-wrap">
-                    <span class="pool-tag yes">YES</span>
-                    <span class="amount-prefix">$</span>
-                    <input id="f-yes-pool" type="number" min="0" step="0.01" placeholder="500">
-                  </div>
-                  <div class="pool-input-wrap">
-                    <span class="pool-tag no">NO</span>
-                    <span class="amount-prefix">$</span>
-                    <input id="f-no-pool" type="number" min="0" step="0.01" placeholder="500">
-                  </div>
-                </div>
-              </div>
-              <div id="add-err" class="err-msg" style="display:none"></div>
-              <button type="submit" class="btn btn-primary w-full">Create Market</button>
-            </form>
-          </div>
+          <div class="admin-form-wrap" id="admin-form-wrap"></div>
 
           <div class="admin-list-wrap">
-            <h3 class="section-head">All Markets (${appData.markets.length})</h3>
-            <div id="admin-market-list">
-              ${appData.markets.length === 0 ? '<p class="hint-txt">No markets yet.</p>' :
-                appData.markets.map(adminMarketRow).join('')}
-            </div>
+            <h3 class="section-head">All Markets (<span id="admin-markets-count">${appData.markets.length}</span>)</h3>
+            <div id="admin-market-list"></div>
           </div>
         </div>
       </div>
@@ -969,16 +1002,13 @@ function renderAdmin() {
             <div class="users-admin-thead">
               <span>Username</span><span>Role</span><span>Balance</span>
             </div>
-            <div id="users-admin-tbody">
-              ${usersAdminRows(Object.entries(appData.users))}
-            </div>
+            <div id="users-admin-tbody"></div>
           </div>
         </div>
       </div>
     </div>
   `;
 
-  // ── Tab switching ──
   document.querySelectorAll('.admin-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       activeAdminTab = tab.dataset.tab;
@@ -991,70 +1021,252 @@ function renderAdmin() {
     });
   });
 
-  // ── Markets tab listeners ──
-  document.getElementById('add-form')?.addEventListener('submit', e => {
+  document.getElementById('user-search').addEventListener('input', () => renderUsersTable());
+
+  renderAdminForm();
+  renderAdminMarketList();
+  renderUsersTable();
+}
+
+function refreshAdminLive() {
+  if (currentUser?.role !== 'admin') { showView('markets'); return; }
+  if (!document.getElementById('admin-market-list')) { renderAdmin(); return; }
+  document.getElementById('admin-markets-count').textContent = appData.markets.length;
+  document.getElementById('admin-users-count').textContent   = Object.keys(appData.users).length;
+  renderAdminMarketList();
+  renderUsersTable();
+}
+
+// ── Admin: create / edit form ──
+function renderAdminForm() {
+  const wrap = document.getElementById('admin-form-wrap');
+  if (!wrap) return;
+  const m = editingMarketId ? appData.markets.find(x => x.id === editingMarketId) : null;
+  if (!m) editingMarketId = null;
+  const editing = !!m;
+  const poolsLocked = editing && (m.status !== 'open' || marketHasPositions(appData, m.id));
+  const cats = editing && !MARKET_CATEGORIES.includes(m.category)
+    ? [...MARKET_CATEGORIES, m.category]
+    : MARKET_CATEGORIES;
+
+  wrap.innerHTML = `
+    <h3 class="section-head">${editing ? 'Edit Market' : 'Create Market'}</h3>
+    <form id="add-form" class="admin-form">
+      <div class="field">
+        <label>Question *</label>
+        <input id="f-title" type="text" placeholder="Will X happen by Y?" maxlength="200">
+      </div>
+      <div class="field">
+        <label>Description / Resolution Criteria</label>
+        <textarea id="f-desc" rows="3" placeholder="How does this market resolve?"></textarea>
+      </div>
+      <div class="field">
+        <label>Category</label>
+        <select id="f-cat">
+          ${cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>End Date</label>
+        <input id="f-ends" type="date">
+      </div>
+      <div class="field">
+        <label class="pool-label-row">
+          ${editing ? 'Pools' : 'Starting Pools'}
+          <span class="pool-hint">${poolsLocked ? 'locked' : 'recommended total: $1000'}</span>
+        </label>
+        ${poolsLocked ? `
+          <p class="hint-txt">Pools can't be changed once people have traded on this market
+            (YES ${fmt$(m.yesPool)} · NO ${fmt$(m.noPool)}).</p>
+        ` : `
+          <div class="pool-inputs-row">
+            <div class="pool-input-wrap">
+              <span class="pool-tag yes">YES</span>
+              <span class="amount-prefix">$</span>
+              <input id="f-yes-pool" type="number" min="0" step="0.01" placeholder="500">
+            </div>
+            <div class="pool-input-wrap">
+              <span class="pool-tag no">NO</span>
+              <span class="amount-prefix">$</span>
+              <input id="f-no-pool" type="number" min="0" step="0.01" placeholder="500">
+            </div>
+          </div>
+        `}
+      </div>
+      <div id="add-err" class="err-msg" style="display:none"></div>
+      ${editing ? `
+        <div class="admin-form-actions">
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+          <button type="button" class="btn btn-ghost" id="edit-cancel-btn">Cancel</button>
+        </div>
+      ` : `
+        <button type="submit" class="btn btn-primary w-full">Create Market</button>
+      `}
+    </form>
+  `;
+
+  // Fill values via the DOM so quotes and other characters in titles are safe.
+  if (editing) {
+    document.getElementById('f-title').value = m.title || '';
+    document.getElementById('f-desc').value  = m.description || '';
+    document.getElementById('f-cat').value   = m.category || 'Random';
+    document.getElementById('f-ends').value  = m.endsAt || '';
+    if (!poolsLocked) {
+      document.getElementById('f-yes-pool').value = m.yesPool;
+      document.getElementById('f-no-pool').value  = m.noPool;
+    }
+  }
+
+  const form = document.getElementById('add-form');
+  form.addEventListener('submit', async e => {
     e.preventDefault();
-    const res = addMarket(
-      document.getElementById('f-title').value,
-      document.getElementById('f-desc').value,
-      document.getElementById('f-cat').value,
-      document.getElementById('f-ends').value,
-      document.getElementById('f-yes-pool').value,
-      document.getElementById('f-no-pool').value
-    );
+    const errEl = document.getElementById('add-err');
+    errEl.style.display = 'none';
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+
+    const yesEl = document.getElementById('f-yes-pool');
+    const noEl  = document.getElementById('f-no-pool');
+    const fields = {
+      title:       document.getElementById('f-title').value,
+      description: document.getElementById('f-desc').value,
+      category:    document.getElementById('f-cat').value,
+      endsAt:      document.getElementById('f-ends').value,
+      yesPool:     yesEl ? yesEl.value : undefined,
+      noPool:      noEl  ? noEl.value  : undefined
+    };
+    const wasEditing = editingMarketId;
+    const res = wasEditing
+      ? await editMarket(wasEditing, fields)
+      : await addMarket(fields.title, fields.description, fields.category, fields.endsAt, fields.yesPool, fields.noPool);
+    submitBtn.disabled = false;
+
     if (res.success) {
-      showToast('Market created!', 'success');
-      document.getElementById('add-form').reset();
-      renderAdmin();
+      showToast(wasEditing ? 'Market updated!' : 'Market created!', 'success');
+      editingMarketId = null;
+      renderAdminForm();
+      renderAdminMarketList();
     } else {
-      const el = document.getElementById('add-err');
-      el.textContent = res.error;
-      el.style.display = 'block';
+      errEl.textContent = res.error;
+      errEl.style.display = 'block';
     }
   });
 
-  document.querySelectorAll('.resolve-yes-btn').forEach(btn =>
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      if (confirm(`Resolve "${btn.dataset.title}" as YES?`)) {
-        const res = resolveMarket(btn.dataset.id, 'yes');
-        if (res.success) { showToast('Resolved YES — winnings distributed!', 'success'); renderAdmin(); refreshHeader(); }
-      }
-    })
-  );
-
-  document.querySelectorAll('.resolve-no-btn').forEach(btn =>
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      if (confirm(`Resolve "${btn.dataset.title}" as NO?`)) {
-        const res = resolveMarket(btn.dataset.id, 'no');
-        if (res.success) { showToast('Resolved NO — winnings distributed!', 'success'); renderAdmin(); refreshHeader(); }
-      }
-    })
-  );
-
-  document.querySelectorAll('.delete-market-btn').forEach(btn =>
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      if (confirm('Delete this market? Open positions will be refunded.')) {
-        const res = deleteMarket(btn.dataset.id);
-        if (res.success) { showToast('Market deleted. Positions refunded.', 'success'); renderAdmin(); refreshHeader(); }
-      }
-    })
-  );
-
-  // ── Users tab listeners ──
-  document.getElementById('user-search')?.addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    const filtered = Object.entries(appData.users).filter(([name, u]) =>
-      name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
-    );
-    document.getElementById('users-admin-tbody').innerHTML = usersAdminRows(filtered);
-    bindUserRows();
+  document.getElementById('edit-cancel-btn')?.addEventListener('click', () => {
+    editingMarketId = null;
+    renderAdminForm();
+    renderAdminMarketList();
   });
+}
 
+function startEditingMarket(marketId) {
+  editingMarketId = marketId;
+  renderAdminForm();
+  renderAdminMarketList();
+  const wrap = document.getElementById('admin-form-wrap');
+  wrap?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('f-title')?.focus({ preventScroll: true });
+}
+
+// ── Admin: market list ──
+function renderAdminMarketList() {
+  const list = document.getElementById('admin-market-list');
+  if (!list) return;
+  list.innerHTML = appData.markets.length === 0
+    ? '<p class="hint-txt">No markets yet.</p>'
+    : appData.markets.map(adminMarketRow).join('');
+
+  const titleOf = id => appData.markets.find(m => m.id === id)?.title || 'this market';
+
+  list.querySelectorAll('.edit-market-btn').forEach(btn =>
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      startEditingMarket(btn.dataset.id);
+    })
+  );
+
+  list.querySelectorAll('.resolve-yes-btn, .resolve-no-btn').forEach(btn =>
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const winner = btn.classList.contains('resolve-yes-btn') ? 'yes' : 'no';
+      if (!confirm(`Resolve "${titleOf(btn.dataset.id)}" as ${winner.toUpperCase()}?`)) return;
+      btn.disabled = true;
+      const res = await resolveMarket(btn.dataset.id, winner);
+      if (res.success) {
+        showToast(`Resolved ${winner.toUpperCase()} — winnings distributed!`, 'success');
+        if (editingMarketId === btn.dataset.id) renderAdminForm();
+      } else {
+        showToast(res.error, 'error');
+        btn.disabled = false;
+      }
+      refreshHeader();
+    })
+  );
+
+  list.querySelectorAll('.delete-market-btn').forEach(btn =>
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      if (!confirm(`Delete "${titleOf(btn.dataset.id)}"? Open positions will be refunded.`)) return;
+      btn.disabled = true;
+      const res = await deleteMarket(btn.dataset.id);
+      if (res.success) {
+        showToast('Market deleted. Positions refunded.', 'success');
+        if (editingMarketId === btn.dataset.id) { editingMarketId = null; renderAdminForm(); }
+      } else {
+        showToast(res.error, 'error');
+        btn.disabled = false;
+      }
+      refreshHeader();
+    })
+  );
+}
+
+function adminMarketRow(m) {
+  const vol = m.yesPool + m.noPool;
+  const yp  = yesPrice(m);
+
+  return `
+    <div class="admin-row ${m.status} ${editingMarketId === m.id ? 'editing' : ''}">
+      <div class="admin-row-info">
+        <div class="admin-row-meta">
+          <span class="status-badge ${m.status}">${m.status}</span>
+          <span class="pos-cat">${esc(m.category)}</span>
+          ${m.winner ? `<span class="res-tag ${m.winner}">${m.winner === 'yes' ? '✓ YES' : '✗ NO'}</span>` : ''}
+        </div>
+        <p class="admin-row-title">${esc(m.title)}</p>
+        <div class="admin-row-stats">
+          <span>YES ${fmtPct(yp)}</span>
+          <span>Vol ${fmt$(vol)}</span>
+          ${m.endsAt ? `<span>${m.endsAt}</span>` : ''}
+        </div>
+      </div>
+      <div class="admin-row-actions">
+        <button class="btn btn-ghost edit-market-btn" data-id="${m.id}">Edit</button>
+        ${m.status === 'open' ? `
+          <button class="btn btn-yes resolve-yes-btn" data-id="${m.id}">✓ YES</button>
+          <button class="btn btn-no  resolve-no-btn"  data-id="${m.id}">✗ NO</button>
+        ` : ''}
+        <button class="btn btn-danger delete-market-btn" data-id="${m.id}">Delete</button>
+      </div>
+    </div>
+  `;
+}
+
+// ── Admin: users table ──
+function renderUsersTable() {
+  const tbody = document.getElementById('users-admin-tbody');
+  if (!tbody) return;
+  const q = (document.getElementById('user-search')?.value || '').toLowerCase();
+  const amtEl    = document.getElementById('adj-amount');
+  const prevAmt  = amtEl?.value || '';
+  const hadFocus = !!amtEl && document.activeElement === amtEl;
+
+  const entries = Object.entries(appData.users).filter(([name, u]) =>
+    !q || name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
+  );
+  tbody.innerHTML = usersAdminRows(entries);
   bindUserRows();
-  bindAdjButtons();
+  openAdjPanel(prevAmt, hadFocus);
 }
 
 function usersAdminRows(entries) {
@@ -1072,9 +1284,6 @@ function usersAdminRows(entries) {
 }
 
 function adjPanelHTML() {
-  if (!selectedAdjUser || !appData.users[selectedAdjUser]) {
-    return '<p class="adj-prompt">Select a user above to adjust their balance.</p>';
-  }
   const u = appData.users[selectedAdjUser];
   return `
     <div class="adj-user-info">
@@ -1093,29 +1302,38 @@ function adjPanelHTML() {
   `;
 }
 
+function openAdjPanel(amount = '', focus = false) {
+  document.querySelectorAll('.users-adj-inline').forEach(el => el.remove());
+  if (!selectedAdjUser || !appData.users[selectedAdjUser]) return;
+  const row = [...document.querySelectorAll('.users-admin-row')]
+    .find(r => r.dataset.username === selectedAdjUser);
+  if (!row) return;
+  const panel = document.createElement('div');
+  panel.className = 'users-adj-inline';
+  panel.innerHTML = adjPanelHTML();
+  row.after(panel);
+  const inp = document.getElementById('adj-amount');
+  inp.value = amount;
+  if (focus) inp.focus({ preventScroll: true });
+  bindAdjButtons();
+}
+
 function bindUserRows() {
   document.querySelectorAll('.users-admin-row').forEach(row => {
     row.addEventListener('click', () => {
-      const wasSelected = selectedAdjUser === row.dataset.username;
-      selectedAdjUser = wasSelected ? null : row.dataset.username;
+      selectedAdjUser = selectedAdjUser === row.dataset.username ? null : row.dataset.username;
       document.querySelectorAll('.users-admin-row').forEach(r =>
         r.classList.toggle('selected', r.dataset.username === selectedAdjUser)
       );
-      document.querySelectorAll('.users-adj-inline').forEach(el => el.remove());
-      if (selectedAdjUser) {
-        const panel = document.createElement('div');
-        panel.className = 'users-adj-inline';
-        panel.innerHTML = adjPanelHTML();
-        row.after(panel);
-        bindAdjButtons();
-      }
+      openAdjPanel();
     });
   });
 }
 
 function bindAdjButtons() {
   if (!selectedAdjUser) return;
-  const doAdjust = sign => {
+  const doAdjust = async sign => {
+    const target = selectedAdjUser;
     const raw    = parseFloat(document.getElementById('adj-amount')?.value);
     const errEl  = document.getElementById('adj-err');
     errEl.style.display = 'none';
@@ -1124,55 +1342,19 @@ function bindAdjButtons() {
       errEl.style.display = 'block';
       return;
     }
-    const res = adjustBalance(selectedAdjUser, sign * raw);
+    const res = await adjustBalance(target, sign * raw);
     if (res.success) {
-      showToast(`Balance updated for ${selectedAdjUser}!`, 'success');
-      document.getElementById('adj-amount').value = '';
-      const balEl = document.getElementById('adj-cur-bal');
-      if (balEl) balEl.textContent = fmt$(appData.users[selectedAdjUser].balance);
-      document.querySelectorAll('.users-admin-row').forEach(r => {
-        if (r.dataset.username === selectedAdjUser) {
-          r.querySelectorAll('span')[2].textContent = fmt$(appData.users[selectedAdjUser].balance);
-        }
-      });
+      showToast(`Balance updated for ${target}!`, 'success');
+      const amtEl = document.getElementById('adj-amount');
+      if (amtEl) amtEl.value = '';
       refreshHeader();
     } else {
-      errEl.textContent = res.error;
-      errEl.style.display = 'block';
+      const el = document.getElementById('adj-err');
+      if (el) { el.textContent = res.error; el.style.display = 'block'; }
     }
   };
   document.getElementById('adj-add-btn')?.addEventListener('click', () => doAdjust(1));
   document.getElementById('adj-sub-btn')?.addEventListener('click', () => doAdjust(-1));
-}
-
-function adminMarketRow(m) {
-  const vol = m.yesPool + m.noPool;
-  const yp  = yesPrice(m);
-
-  return `
-    <div class="admin-row ${m.status}">
-      <div class="admin-row-info">
-        <div class="admin-row-meta">
-          <span class="status-badge ${m.status}">${m.status}</span>
-          <span class="pos-cat">${esc(m.category)}</span>
-          ${m.winner ? `<span class="res-tag ${m.winner}">${m.winner === 'yes' ? '✓ YES' : '✗ NO'}</span>` : ''}
-        </div>
-        <p class="admin-row-title">${esc(m.title)}</p>
-        <div class="admin-row-stats">
-          <span>YES ${fmtPct(yp)}</span>
-          <span>Vol ${fmt$(vol)}</span>
-          ${m.endsAt ? `<span>${m.endsAt}</span>` : ''}
-        </div>
-      </div>
-      <div class="admin-row-actions">
-        ${m.status === 'open' ? `
-          <button class="btn btn-yes resolve-yes-btn" data-id="${m.id}" data-title="${esc(m.title)}">✓ YES</button>
-          <button class="btn btn-no  resolve-no-btn"  data-id="${m.id}" data-title="${esc(m.title)}">✗ NO</button>
-        ` : ''}
-        <button class="btn btn-danger delete-market-btn" data-id="${m.id}">Delete</button>
-      </div>
-    </div>
-  `;
 }
 
 // ── Render: Explore ────────────────────────────────────────────────────────
@@ -1444,7 +1626,7 @@ function renderGames() {
 
   document.querySelectorAll('[data-gtab]').forEach(tab => {
     tab.addEventListener('click', () => {
-      stopDinoGame();
+      finishOrStopDinoGame();
       activeGamesTab = tab.dataset.gtab;
       document.querySelectorAll('[data-gtab]').forEach(t =>
         t.classList.toggle('active', t.dataset.gtab === activeGamesTab)
@@ -1464,43 +1646,49 @@ function renderGamesTab() {
   else renderPlinkoGame(content);
 }
 
-function placeGameWager(rawAmount, gameName) {
+async function placeGameWager(rawAmount, gameName) {
   const amount = parseFloat(rawAmount);
-  const ud = userData();
-  if (!ud) return { success: false, error: 'Not logged in.' };
+  if (!currentUser) return { success: false, error: 'Not logged in.' };
   if (!amount || amount <= 0) return { success: false, error: 'Enter a valid wager.' };
-  if (amount > ud.balance + 0.001) return { success: false, error: 'Insufficient balance.' };
-  ud.balance = +((ud.balance - amount).toFixed(2));
-  if (!ud.history) ud.history = [];
-  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance, note: gameName });
-  syncCurrentUser();
-  saveData();
+  const username = currentUser.username;
+  const res = await commit(d => {
+    const ud = d.users[username];
+    if (!ud) return { success: false, error: 'Not logged in.' };
+    if (amount > ud.balance + 0.001) return { success: false, error: 'Insufficient balance.' };
+    ud.balance = +((ud.balance - amount).toFixed(2));
+    pushHistory(ud, { bal: ud.balance, note: gameName });
+    return { success: true, amount };
+  });
   refreshHeader();
-  return { success: true, amount };
+  return res;
 }
 
-function awardGamePayout(amount, gameName) {
-  const ud = userData();
-  if (!ud || amount <= 0) return;
-  ud.balance = +((ud.balance + amount).toFixed(2));
-  if (!ud.history) ud.history = [];
-  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance, note: gameName });
-  syncCurrentUser();
-  saveData();
+async function awardGamePayout(amount, gameName) {
+  if (!currentUser || amount <= 0) return;
+  const username = currentUser.username;
+  await commit(d => {
+    const ud = d.users[username];
+    if (!ud) return { success: false };
+    ud.balance = +((ud.balance + amount).toFixed(2));
+    pushHistory(ud, { bal: ud.balance, note: gameName });
+    return { success: true };
+  });
   refreshHeader();
 }
 
-function chargeGameLoss(amount, gameName) {
-  const ud = userData();
-  if (!ud || amount <= 0) return 0;
-  const charged = Math.min(amount, ud.balance);
-  ud.balance = +((ud.balance - charged).toFixed(2));
-  if (!ud.history) ud.history = [];
-  ud.history.push({ ts: new Date().toISOString(), bal: ud.balance, note: gameName });
-  syncCurrentUser();
-  saveData();
+async function chargeGameLoss(amount, gameName) {
+  if (!currentUser || amount <= 0) return 0;
+  const username = currentUser.username;
+  const res = await commit(d => {
+    const ud = d.users[username];
+    if (!ud) return { success: false };
+    const charged = Math.min(amount, ud.balance);
+    ud.balance = +((ud.balance - charged).toFixed(2));
+    pushHistory(ud, { bal: ud.balance, note: gameName });
+    return { success: true, charged };
+  });
   refreshHeader();
-  return charged;
+  return res.success ? res.charged : 0;
 }
 
 function renderPlinkoGame(content) {
@@ -1586,13 +1774,17 @@ function plinkoBucketHTML(risk) {
   return plinkoMultipliers(risk).map(m => `<span>${m}x</span>`).join('');
 }
 
-function playPlinko() {
+async function playPlinko() {
   const btn = document.getElementById('plinko-drop-btn');
+  if (btn.disabled) return;
   const risk = document.getElementById('plinko-risk').value;
   const wager = document.getElementById('plinko-wager').value;
-  const res = placeGameWager(wager, 'Luck');
+  btn.disabled = true;
+  const res = await placeGameWager(wager, 'Luck');
   const resultEl = document.getElementById('plinko-result');
+  if (!resultEl) return;
   if (!res.success) {
+    btn.disabled = false;
     resultEl.textContent = res.error;
     resultEl.className = 'game-result loss';
     return;
@@ -1603,7 +1795,6 @@ function playPlinko() {
   const mult = multipliers[bucket];
   const payout = +(res.amount * mult).toFixed(2);
 
-  btn.disabled = true;
   resultEl.textContent = 'Dropping...';
   resultEl.className = 'game-result';
   const chip = document.getElementById('plinko-chip');
@@ -1615,9 +1806,9 @@ function playPlinko() {
     chip.style.top = '82%';
   });
 
-  setTimeout(() => {
+  setTimeout(async () => {
     if (mult < 0) {
-      const extraLoss = chargeGameLoss(Math.max(0, (Math.abs(mult) - 1) * res.amount), 'Luck');
+      const extraLoss = await chargeGameLoss(Math.max(0, (Math.abs(mult) - 1) * res.amount), 'Luck');
       resultEl.textContent = `${mult}x multiplier. ${extraLoss > 0 ? `Lost an extra ${fmt$(extraLoss)}.` : 'No payout this drop.'}`;
       resultEl.className = 'game-result loss';
     } else {
@@ -1680,8 +1871,19 @@ function cardBackHTML() {
   return '<div class="playing-card card-back">?</div>';
 }
 
-function startHiLoCards() {
-  const res = placeGameWager(document.getElementById('cards-wager').value, 'Cards');
+async function startHiLoCards() {
+  const btn = document.getElementById('cards-start-btn');
+  if (btn.disabled) return;
+  if (hiLoRound) {
+    // Dealing again used to silently throw away the current round and its wager.
+    const prompt = document.getElementById('cards-prompt');
+    prompt.textContent = 'Finish the current round first.';
+    prompt.className = 'game-result loss';
+    return;
+  }
+  btn.disabled = true;
+  const res = await placeGameWager(document.getElementById('cards-wager').value, 'Cards');
+  btn.disabled = false;
   if (!res.success) {
     const prompt = document.getElementById('cards-prompt');
     prompt.textContent = res.error;
@@ -1808,14 +2010,13 @@ function getRunnerHighScore(username) {
 }
 
 function saveRunnerHighScore(score) {
-  if (!currentUser || score <= getRunnerHighScore(currentUser.username)) return false;
-  ensureGameDataShape();
-  appData.runnerScores[currentUser.username] = {
-    score,
-    updatedAt: new Date().toISOString()
-  };
-  saveData();
-  return true;
+  if (!currentUser || score <= getRunnerHighScore(currentUser.username)) return;
+  const username = currentUser.username;
+  commit(d => {
+    if (score <= Number(d.runnerScores[username]?.score || 0)) return { success: false };
+    d.runnerScores[username] = { score, updatedAt: new Date().toISOString() };
+    return { success: true };
+  });
 }
 
 function runnerLeaderboardHTML() {
@@ -1865,7 +2066,7 @@ function renderRunnerGame(content) {
               <h3>Quark Run</h3>
               <p>You are a runaway particle escaping pesky scientists. Run as far as you can and jump with Space (desktop) or the button (mobile) to stay free.</p>
             </div>
-            <span class="game-chip">Score pays up to 6x</span>
+            <span class="game-chip">Score pays up to 3x</span>
           </div>
           <div class="game-controls runner-controls">
             <div class="field">
@@ -1886,9 +2087,10 @@ function renderRunnerGame(content) {
         </div>
         <div class="game-side">
           <div class="game-side-stat"><span>Space</span><strong>Jump</strong></div>
-          <div class="game-side-stat"><span>80 score</span><strong>1.5x</strong></div>
-          <div class="game-side-stat"><span>120 score</span><strong>3x</strong></div>
-          <div class="game-side-stat"><span>180 score</span><strong>6x cap</strong></div>
+          <div class="game-side-stat"><span>100 score</span><strong>0.4x</strong></div>
+          <div class="game-side-stat"><span>200 score</span><strong>1x (break even)</strong></div>
+          <div class="game-side-stat"><span>300 score</span><strong>1.75x</strong></div>
+          <div class="game-side-stat"><span>500 score</span><strong>3x cap</strong></div>
         </div>
       </div>
       <div id="runner-leaderboard">${runnerLeaderboardHTML()}</div>
@@ -1903,10 +2105,23 @@ function renderRunnerGame(content) {
   });
 }
 
-function startDinoGame() {
-  stopDinoGame();
-  const res = placeGameWager(document.getElementById('runner-wager').value, 'Quark Run');
+let runnerStarting = false;
+
+async function startDinoGame() {
+  if (runnerStarting) return;
+  finishOrStopDinoGame();
+  runnerStarting = true;
+  const startBtn = document.getElementById('runner-start-btn');
+  startBtn.disabled = true;
+  const res = await placeGameWager(document.getElementById('runner-wager').value, 'Quark Run');
+  runnerStarting = false;
+  startBtn.disabled = false;
   const result = document.getElementById('runner-result');
+  if (!result) {
+    // Player left the Games tab while the wager was saving; refund it.
+    if (res.success) awardGamePayout(res.amount, 'Quark Run refund');
+    return;
+  }
   if (!res.success) {
     result.textContent = res.error;
     result.className = 'game-result loss';
@@ -1932,6 +2147,13 @@ function stopDinoGame() {
   if (dinoState.frame) cancelAnimationFrame(dinoState.frame);
   dinoState.frame = null;
   dinoState.running = false;
+}
+
+// Leaving a run mid-game used to just stop it, keeping the wager with no payout.
+// Now it ends the run and pays out for the score reached, as if the player crashed.
+function finishOrStopDinoGame() {
+  if (dinoState.running) endDinoGame();
+  else stopDinoGame();
 }
 
 function jumpDino(isTouch = false) {
@@ -2004,11 +2226,14 @@ function runnerSpeed() {
   return 0.34 + Math.min(0.56, dinoState.score / 220);
 }
 
+// Break-even is at 200 (~31s of play). Most players crash between 80 and 160,
+// which returns 0.3x–0.76x, so the game loses money for most runs.
 function runnerMultiplier(score) {
-  if (score >= 180) return 6;
-  if (score >= 120) return 3 + ((score - 120) / 60) * 3;
-  if (score >= 80) return 1.5 + ((score - 80) / 40) * 1.5;
-  return Math.max(0, score / 80 * 1.5);
+  if (score >= 500) return 3;
+  if (score >= 300) return 1.75 + ((score - 300) / 200) * 1.25;
+  if (score >= 200) return 1 + ((score - 200) / 100) * 0.75;
+  if (score >= 100) return 0.4 + ((score - 100) / 100) * 0.6;
+  return Math.max(0, score / 100 * 0.4);
 }
 
 function spawnRunnerObstacles() {
@@ -2214,11 +2439,14 @@ function openModal(marketId, triggerEl = null) {
       </div>
     `}
 
-    ${currentUser?.role === 'admin' && m.status === 'open' ? `
+    ${currentUser?.role === 'admin' ? `
       <div class="modal-admin-bar">
         <span class="modal-admin-label">Admin:</span>
-        <button class="btn btn-yes" onclick="adminResolve('yes')">Resolve YES ✓</button>
-        <button class="btn btn-no"  onclick="adminResolve('no')">Resolve NO ✗</button>
+        <button class="btn btn-ghost" onclick="adminEditFromModal()">Edit</button>
+        ${m.status === 'open' ? `
+          <button class="btn btn-yes" onclick="adminResolve('yes')">Resolve YES ✓</button>
+          <button class="btn btn-no"  onclick="adminResolve('no')">Resolve NO ✗</button>
+        ` : ''}
       </div>
     ` : ''}
   `;
@@ -2310,30 +2538,47 @@ function updateEstimate() {
   row.style.display = 'flex';
 }
 
-function executeTrade() {
-  const amount = document.getElementById('trade-amt')?.value;
-  const errEl  = document.getElementById('trade-err');
-  const res    = buyShares(selectedMarketId, selectedTradeSide, amount);
+async function executeTrade() {
+  const btn = document.getElementById('trade-btn');
+  if (!btn || btn.disabled) return;
+  const amount   = document.getElementById('trade-amt')?.value;
+  const marketId = selectedMarketId;
+  const side     = selectedTradeSide;
+  btn.disabled = true;
+  const res = await buyShares(marketId, side, amount);
+  btn.disabled = false;
+  refreshHeader();
 
   if (res.success) {
-    showToast(`Bought ${selectedTradeSide.toUpperCase()} position!`, 'success');
-    openModal(selectedMarketId);
-    refreshHeader();
+    showToast(`Bought ${side.toUpperCase()} position!`, 'success');
+    if (selectedMarketId === marketId) openModal(marketId);
   } else {
+    const errEl = document.getElementById('trade-err');
+    if (!errEl) return;
     errEl.textContent  = res.error;
     errEl.style.display = 'block';
   }
 }
 
-function adminResolve(winner) {
+async function adminResolve(winner) {
   if (!confirm(`Resolve as ${winner.toUpperCase()}?`)) return;
-  const res = resolveMarket(selectedMarketId, winner);
+  const res = await resolveMarket(selectedMarketId, winner);
   if (res.success) {
     showToast(`Resolved ${winner.toUpperCase()} — winnings paid out!`, 'success');
     closeModal();
-    renderMarkets();
     refreshHeader();
+  } else {
+    showToast(res.error, 'error');
   }
+}
+
+function adminEditFromModal() {
+  const id = selectedMarketId;
+  closeModal();
+  activeAdminTab = 'markets';
+  editingMarketId = id;
+  showView('admin');
+  startEditingMarket(id);
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────

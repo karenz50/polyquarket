@@ -481,6 +481,9 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
   gap: 12px;
 }
 .admin-row:last-child { border-bottom: none; }
+.admin-row.editing { box-shadow: inset 3px 0 0 var(--primary); background: rgba(99,102,241,.06); padding-left: 12px; padding-right: 8px; }
+.admin-form-actions { display: flex; gap: 10px; }
+.admin-form-actions .btn { flex: 1; }
 
 .admin-row-meta  { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .admin-row-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
@@ -535,7 +538,10 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
   flex-direction: column;
   gap: 20px;
   box-shadow: 0 20px 60px rgba(0,0,0,.6);
+  overflow-x: hidden;
+  min-width: 0;
 }
+#modal-content > * { min-width: 0; }
 
 .modal-head {
   display: flex;
@@ -560,6 +566,7 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
   font-size: 18px;
   font-weight: 700;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .modal-desc {
@@ -570,6 +577,7 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
   padding: 12px;
   border-radius: var(--r-sm);
   border-left: 3px solid var(--border2);
+  overflow-wrap: anywhere;
 }
 
 /* modal probability display */
@@ -674,6 +682,8 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }
 .trade-title { font-weight: 700; font-size: 15px; }
 .trade-bal   { font-size: 13px; color: var(--text2); }
@@ -727,6 +737,8 @@ code { background: var(--surface3); padding: 2px 6px; border-radius: 4px; font-s
 .amount-prefix { padding: 0 12px; color: var(--text3); font-size: 16px; }
 .amount-row input {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   background: none;
   border: none;
   color: var(--text);
